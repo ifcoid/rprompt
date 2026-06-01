@@ -102,7 +102,13 @@ func main() {
 		log.Println("izin interaktif AKTIF: tiap tool akan minta persetujuan via tombol Telegram")
 	}
 
-	srv := server.New(cfg, tg, runner, st, reg)
+	// Runner khusus jalur API: tanpa argumen izin interaktif (--permission-prompt-tool),
+	// karena API tidak punya chat Telegram untuk meminta persetujuan. Tool pada
+	// jalur API mengikuti CLAUDE_EXTRA_ARGS saja.
+	apiRunner := *runner
+	apiRunner.PermissionArgs = nil
+
+	srv := server.New(cfg, tg, runner, &apiRunner, st, reg)
 
 	httpSrv := &http.Server{
 		Addr:              cfg.ListenAddr,

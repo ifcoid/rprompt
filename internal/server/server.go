@@ -20,25 +20,41 @@ import (
 	"github.com/awangga/rprompt/internal/telegram"
 )
 
+// promptRunner adalah subset claude.Runner yang dipakai Server (diabstraksikan
+// agar handler bisa diuji tanpa menjalankan binary claude).
+type promptRunner interface {
+	RunStream(ctx context.Context, prompt, sessionID string, onEvent func(claude.StreamEvent)) (claude.Result, error)
+}
+
 // Server menahan dependensi runtime handler.
 type Server struct {
-	cfg    *config.Config
-	tg     *telegram.Client
-	runner *claude.Runner
-	store  *store.Store
-	reg    *approval.Registry // nil bila izin interaktif nonaktif
-	sem    chan struct{}      // membatasi eksekusi claude bersamaan (default 1)
+	cfg       *config.Config
+	tg        *telegram.Client
+	runner    promptRunner // jalur Telegram (boleh pakai izin interaktif)
+	apiRunner promptRunner // jalur API (tanpa izin interaktif)
+	store     *store.Store
+	reg       *approval.Registry // nil bila izin interaktif nonaktif
+
+	tgSem  chan struct{} // serialisasi Telegram: ukuran 1
+	apiSem chan struct{} // batas paralel API; nil = tak terbatas
 }
 
 // New membangun Server. reg boleh nil bila izin interaktif tidak dipakai.
-func New(cfg *config.Config, tg *telegram.Client, runner *claude.Runner, st *store.Store, reg *approval.Registry) *Server {
+// apiRunner dipakai jalur API (sebaiknya tanpa argumen --permission-prompt-tool).
+func New(cfg *config.Config, tg *telegram.Client, runner, apiRunner promptRunner, st *store.Store, reg *approval.Registry) *Server {
+	var apiSem chan struct{}
+	if cfg.APIMaxConcurrent > 0 {
+		apiSem = make(chan struct{}, cfg.APIMaxConcurrent)
+	}
 	return &Server{
-		cfg:    cfg,
-		tg:     tg,
-		runner: runner,
-		store:  st,
-		reg:    reg,
-		sem:    make(chan struct{}, 1),
+		cfg:       cfg,
+		tg:        tg,
+		runner:    runner,
+		apiRunner: apiRunner,
+		store:     st,
+		reg:       reg,
+		tgSem:     make(chan struct{}, 1),
+		apiSem:    apiSem,
 	}
 }
 
@@ -50,6 +66,9 @@ func (s *Server) Handler() http.Handler {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
+	if s.cfg.APIEnabled {
+		mux.HandleFunc("/api/prompt", s.handleAPIPrompt)
+	}
 	return mux
 }
 
@@ -251,16 +270,16 @@ func (s *Server) handleAttachment(msg *telegram.Message) {
 }
 
 func (s *Server) handlePrompt(chatID int64, prompt string) {
-	// Antri agar hanya satu prompt diproses pada satu waktu.
+	// Telegram diserialisasi: hanya satu prompt diproses pada satu waktu.
 	select {
-	case s.sem <- struct{}{}:
+	case s.tgSem <- struct{}{}:
 	default:
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		_ = s.tg.SendMessage(ctx, chatID, "Sedang memproses prompt lain, mohon tunggu sebentar lalu kirim ulang.")
 		cancel()
 		return
 	}
-	defer func() { <-s.sem }()
+	defer func() { <-s.tgSem }()
 
 	// Tandai chat aktif agar permintaan izin (bila ada) dikirim ke sini.
 	if s.reg != nil {

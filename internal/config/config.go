@@ -36,6 +36,11 @@ type Config struct {
 	// Auto-tunnel: jalankan cloudflared & daftarkan webhook otomatis.
 	AutoTunnel     bool   // jalankan cloudflared sendiri lalu set-webhook otomatis
 	CloudflaredBin string // path binary cloudflared
+
+	// HTTP API untuk aplikasi lain (POST /api/prompt).
+	APIEnabled       bool   // aktifkan endpoint API
+	APIToken         string // token Bearer yang wajib pada setiap request API
+	APIMaxConcurrent int    // maks eksekusi API paralel; 0 = tak terbatas
 }
 
 // LocalPort mengembalikan port dari ListenAddr (default "8080").
@@ -99,6 +104,18 @@ func Load() (*Config, error) {
 
 	c.AutoTunnel = isTrue(os.Getenv("AUTO_TUNNEL"))
 	c.CloudflaredBin = getenv("CLOUDFLARED_BIN", "cloudflared")
+
+	c.APIEnabled = isTrue(os.Getenv("API_ENABLED"))
+	c.APIToken = os.Getenv("API_TOKEN")
+	if c.APIEnabled && c.APIToken == "" {
+		return nil, fmt.Errorf("API_TOKEN wajib diisi bila API_ENABLED=true")
+	}
+	amc := getenv("API_MAX_CONCURRENT", "0")
+	mc, err := strconv.Atoi(amc)
+	if err != nil || mc < 0 {
+		return nil, fmt.Errorf("API_MAX_CONCURRENT tidak valid (harus >= 0): %q", amc)
+	}
+	c.APIMaxConcurrent = mc
 
 	for _, part := range strings.Split(os.Getenv("ALLOWED_CHAT_IDS"), ",") {
 		part = strings.TrimSpace(part)

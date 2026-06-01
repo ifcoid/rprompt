@@ -34,6 +34,8 @@ update Telegram diverifikasi dengan `secret_token`.
 - **Ambil berkas** — `/get <path>` mengirim berkas dari direktori kerja ke chat.
 - **Izin tool via tombol** — opsional: setujui/tolak tiap pemakaian tool lewat
   tombol Telegram (lihat di bawah).
+- **HTTP API** — opsional: endpoint `POST /api/prompt` agar aplikasi lain bisa
+  prompting ke Claude (lihat di bawah).
 - **Whitelist + secret token**, antrian 1 prompt, shutdown rapi.
 
 ### Izin tool
@@ -139,6 +141,54 @@ Claude Code, dan hasilnya dikirim balik ke Telegram.
 | `/get <path>` | Kirim berkas dari direktori kerja ke chat          |
 | foto/dokumen  | Diunduh & diteruskan ke Claude untuk dianalisis    |
 | teks lain     | Dikirim sebagai prompt ke Claude Code              |
+
+## HTTP API (untuk aplikasi lain)
+
+Selain Telegram, rprompt bisa dipakai sebagai **backend prompting** oleh aplikasi
+lain. Aktifkan dengan `API_ENABLED=true` dan isi `API_TOKEN` di `.env`. Endpoint
+berjalan di server yang sama (`LISTEN_ADDR`), jadi ikut terjangkau lewat tunnel
+bila dipakai.
+
+### `POST /api/prompt`
+
+Header wajib: `Authorization: Bearer <API_TOKEN>`
+
+Request:
+
+```json
+{ "prompt": "teks prompt", "session_id": "opsional-untuk-lanjut" }
+```
+
+Response:
+
+```json
+{ "result": "jawaban Claude", "session_id": "id-sesi-baru", "is_error": false }
+```
+
+Contoh:
+
+```sh
+curl -X POST http://localhost:8080/api/prompt \
+  -H "Authorization: Bearer $API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"Ringkas isi README dalam 1 kalimat"}'
+```
+
+Untuk melanjutkan percakapan, kirim balik `session_id` dari respons sebelumnya
+pada request berikutnya (caller yang menyimpan session_id — server tidak
+menyimpannya untuk jalur API).
+
+**Konkurensi:** jalur API berjalan **paralel** (tidak diantrikan) — beberapa
+aplikasi bisa prompting bersamaan, masing-masing dengan `session_id` sendiri.
+Batasi dengan `API_MAX_CONCURRENT` (0 = tak terbatas); bila diset dan penuh,
+request baru langsung dapat **429**. **Telegram tetap serial** (1 prompt pada
+satu waktu) dan terpisah dari API.
+
+> Catatan: jalur API memakai runner **tanpa** izin interaktif. Jadi meski
+> `INTERACTIVE_PERMISSIONS=true` (untuk tombol Telegram), prompt via API yang
+> memicu tool mengikuti `CLAUDE_EXTRA_ARGS` saja — bukan tombol Telegram. Untuk
+> API yang butuh tool, set mis. `CLAUDE_EXTRA_ARGS=--permission-mode acceptEdits`.
+> Ingat: konkurensi tinggi berbagi kuota/rate-limit langganan Claude Anda.
 
 ## Pengembangan
 
