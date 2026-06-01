@@ -1,0 +1,6 @@
+# Simpan semua berkas teks sebagai LF di repo dan saat checkout (hindari churn
+# CRLF di Windows yang membuat gofmt menandai file & diff berisik).
+* text=auto eol=lf
+
+# Berkas biner.
+*.exe binary

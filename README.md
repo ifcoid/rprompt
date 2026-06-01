@@ -96,22 +96,38 @@ Lihat `.env.example` untuk daftar lengkap dan penjelasannya.
 
 ## Menjalankan
 
+### Cara mudah — auto-tunnel (disarankan)
+
+Set `AUTO_TUNNEL=true` di `.env`, lalu cukup:
+
 ```sh
-# 1. Build
 go build -o rprompt ./cmd/rprompt        # Windows: go build -o rprompt.exe ./cmd/rprompt
+./rprompt
+```
 
-# 2. Jalankan tunnel pada terminal terpisah, lalu set WEBHOOK_URL di .env
-#    sesuai URL publik yang dihasilkan tunnel.
+Service akan menjalankan `cloudflared` sendiri, mengambil URL-nya, lalu
+mendaftarkan webhook otomatis — tiap kali dijalankan. Saat dihentikan (Ctrl-C),
+webhook dihapus & cloudflared dimatikan. Tidak perlu salin-tempel URL.
 
-# 3. Daftarkan webhook ke Telegram (sekali setiap WEBHOOK_URL berubah)
-./rprompt -set-webhook
+> Quick-tunnel cloudflared butuh ~1-2 menit agar DNS-nya ter-publish sebelum
+> webhook bisa didaftarkan (service menunggu otomatis lalu mendaftar). Ini
+> wajar. Untuk URL tetap & tanpa tunggu, gunakan **named tunnel** (lihat bawah).
 
-# 4. Jalankan service
+### Cara manual (URL/tunnel sendiri)
+
+```sh
+go build -o rprompt ./cmd/rprompt
+cloudflared tunnel --url http://localhost:8080   # salin URL → WEBHOOK_URL di .env (AUTO_TUNNEL=false)
+./rprompt -set-webhook                            # ulangi tiap WEBHOOK_URL berubah
 ./rprompt
 ```
 
 Setelah itu, kirim pesan apa pun ke bot dari HP — itu menjadi prompt untuk
 Claude Code, dan hasilnya dikirim balik ke Telegram.
+
+> **URL permanen:** quick-tunnel memberi URL acak tiap jalan. Untuk hostname
+> tetap (tanpa tunggu DNS), pakai cloudflared *named tunnel* dengan domain Anda
+> di Cloudflare, set `WEBHOOK_URL` sekali, dan `AUTO_TUNNEL=false`.
 
 ## Perintah bot
 

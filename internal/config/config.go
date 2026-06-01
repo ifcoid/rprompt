@@ -5,6 +5,7 @@ package config
 import (
 	"bufio"
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -31,6 +32,19 @@ type Config struct {
 	MCPPath         string        // path endpoint MCP, mis. "/mcp"
 	ApprovalTimeout time.Duration // batas tunggu tap tombol sebelum auto-tolak
 	ResultFormat    string        // format hasil izin: "behavior" | "hook"
+
+	// Auto-tunnel: jalankan cloudflared & daftarkan webhook otomatis.
+	AutoTunnel     bool   // jalankan cloudflared sendiri lalu set-webhook otomatis
+	CloudflaredBin string // path binary cloudflared
+}
+
+// LocalPort mengembalikan port dari ListenAddr (default "8080").
+func (c *Config) LocalPort() string {
+	_, port, err := net.SplitHostPort(c.ListenAddr)
+	if err != nil || port == "" {
+		return "8080"
+	}
+	return port
 }
 
 // MCPURL menyusun URL penuh server MCP untuk --mcp-config.
@@ -82,6 +96,9 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("APPROVAL_TIMEOUT_SECONDS tidak valid: %q", asecs)
 	}
 	c.ApprovalTimeout = time.Duration(an) * time.Second
+
+	c.AutoTunnel = isTrue(os.Getenv("AUTO_TUNNEL"))
+	c.CloudflaredBin = getenv("CLOUDFLARED_BIN", "cloudflared")
 
 	for _, part := range strings.Split(os.Getenv("ALLOWED_CHAT_IDS"), ",") {
 		part = strings.TrimSpace(part)

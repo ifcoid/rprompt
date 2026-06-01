@@ -13,10 +13,13 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -27,6 +30,7 @@ import (
 	"github.com/awangga/rprompt/internal/server"
 	"github.com/awangga/rprompt/internal/store"
 	"github.com/awangga/rprompt/internal/telegram"
+	"github.com/awangga/rprompt/internal/tunnel"
 )
 
 func main() {
@@ -113,17 +117,117 @@ func main() {
 		}
 	}()
 
+	// Auto-tunnel: jalankan cloudflared & daftarkan webhook otomatis.
+	var tun *tunnel.Tunnel
+	if cfg.AutoTunnel {
+		t, err := tunnel.Start(context.Background(), cfg.CloudflaredBin, cfg.LocalPort(), 60*time.Second)
+		if err != nil {
+			log.Fatalf("auto-tunnel: %v", err)
+		}
+		tun = t
+		log.Printf("cloudflared tunnel: %s", tun.URL)
+
+		// PENTING: tunggu DNS quick-tunnel ter-publish SEBELUM memanggil
+		// setWebhook. Bila setWebhook dipanggil saat host belum bisa di-resolve,
+		// resolver Telegram nge-cache hasil NXDOMAIN (negative cache) dan menahan
+		// kegagalan walau DNS sudah hidup. Cek pakai resolver publik (1.1.1.1)
+		// karena resolver lokal bisa lambat/tak meng-resolve subdomain baru.
+		host := tunnelHost(tun.URL)
+		log.Println("menunggu DNS tunnel ter-publish (bisa ~1-2 menit)...")
+		if waitDNSPublished(host, 180*time.Second) {
+			log.Println("DNS ter-publish; memberi jeda singkat lalu mendaftarkan webhook.")
+			time.Sleep(5 * time.Second)
+		} else {
+			log.Println("peringatan: DNS belum terkonfirmasi setelah 3 menit; tetap mencoba.")
+		}
+		if err := registerWebhook(tg, tun.URL+cfg.WebhookPath, cfg.WebhookSecret); err != nil {
+			_ = tun.Stop()
+			log.Fatalf("set webhook otomatis gagal: %v", err)
+		}
+		log.Printf("webhook otomatis terdaftar: %s%s", tun.URL, cfg.WebhookPath)
+	}
+
 	// Tunggu sinyal untuk shutdown rapi.
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
 	log.Println("mematikan server...")
 
+	// Bersihkan tunnel & webhook bila auto-tunnel dipakai.
+	if tun != nil {
+		dctx, dcancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := tg.DeleteWebhook(dctx); err != nil {
+			log.Printf("hapus webhook: %v", err)
+		}
+		dcancel()
+		if err := tun.Stop(); err != nil {
+			log.Printf("stop tunnel: %v", err)
+		}
+		log.Println("tunnel & webhook dibersihkan")
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := httpSrv.Shutdown(ctx); err != nil {
 		log.Printf("shutdown: %v", err)
 	}
+}
+
+// tunnelHost mengambil hostname dari URL tunnel.
+func tunnelHost(rawURL string) string {
+	if u, err := url.Parse(rawURL); err == nil && u.Hostname() != "" {
+		return u.Hostname()
+	}
+	return strings.TrimPrefix(strings.TrimPrefix(rawURL, "https://"), "http://")
+}
+
+// waitDNSPublished melakukan polling resolusi host lewat resolver publik
+// (1.1.1.1) sampai berhasil atau timeout. Memakai resolver publik karena
+// resolver sistem/lokal bisa lambat atau gagal meng-resolve subdomain baru.
+func waitDNSPublished(host string, timeout time.Duration) bool {
+	resolver := &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			d := net.Dialer{Timeout: 5 * time.Second}
+			return d.DialContext(ctx, "udp", "1.1.1.1:53")
+		},
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		addrs, err := resolver.LookupHost(ctx, host)
+		cancel()
+		if err == nil && len(addrs) > 0 {
+			return true
+		}
+		time.Sleep(3 * time.Second)
+	}
+	return false
+}
+
+// registerWebhook mendaftarkan webhook dengan sedikit retry. Dipanggil setelah
+// DNS dipastikan ter-publish, jadi umumnya berhasil pada percobaan pertama.
+func registerWebhook(tg *telegram.Client, url, secret string) error {
+	const (
+		attempts = 12
+		interval = 5 * time.Second
+	)
+	var err error
+	for i := 1; i <= attempts; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		err = tg.SetWebhook(ctx, url, secret)
+		cancel()
+		if err == nil {
+			return nil
+		}
+		if i%3 == 0 || i == 1 { // jangan terlalu berisik
+			log.Printf("  ...belum siap (percobaan %d/%d): %v", i, attempts, err)
+		}
+		if i < attempts {
+			time.Sleep(interval)
+		}
+	}
+	return err
 }
 
 // tgNotifier mengimplementasikan approval.Notifier memakai Telegram.
