@@ -1,0 +1,350 @@
+// Package server menyediakan handler webhook Telegram: memvalidasi keamanan,
+// memfilter chat yang diizinkan, menangani perintah & lampiran, dan menjalankan
+// prompt melalui Claude Code dengan output streaming.
+package server
+
+import (
+	"context"
+	"encoding/json"
+	"log"
+	"net/http"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/awangga/rprompt/internal/approval"
+	"github.com/awangga/rprompt/internal/claude"
+	"github.com/awangga/rprompt/internal/config"
+	"github.com/awangga/rprompt/internal/store"
+	"github.com/awangga/rprompt/internal/telegram"
+)
+
+// Server menahan dependensi runtime handler.
+type Server struct {
+	cfg    *config.Config
+	tg     *telegram.Client
+	runner *claude.Runner
+	store  *store.Store
+	reg    *approval.Registry // nil bila izin interaktif nonaktif
+	sem    chan struct{}      // membatasi eksekusi claude bersamaan (default 1)
+}
+
+// New membangun Server. reg boleh nil bila izin interaktif tidak dipakai.
+func New(cfg *config.Config, tg *telegram.Client, runner *claude.Runner, st *store.Store, reg *approval.Registry) *Server {
+	return &Server{
+		cfg:    cfg,
+		tg:     tg,
+		runner: runner,
+		store:  st,
+		reg:    reg,
+		sem:    make(chan struct{}, 1),
+	}
+}
+
+// Handler mengembalikan http.Handler yang siap dipasang.
+func (s *Server) Handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc(s.cfg.WebhookPath, s.handleWebhook)
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+	return mux
+}
+
+func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.cfg.WebhookSecret != "" {
+		if r.Header.Get("X-Telegram-Bot-Api-Secret-Token") != s.cfg.WebhookSecret {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+	}
+
+	var update telegram.Update
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&update); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+
+	// Balas 200 segera; pemrosesan berjalan asinkron agar Telegram tidak retry.
+	w.WriteHeader(http.StatusOK)
+
+	switch {
+	case update.CallbackQuery != nil:
+		go s.handleCallback(update.CallbackQuery)
+	case update.Message != nil:
+		go s.process(update.Message)
+	}
+}
+
+// handleCallback menangani penekanan tombol Izinkan/Tolak pada permintaan izin.
+func (s *Server) handleCallback(cb *telegram.CallbackQuery) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	var chatID int64
+	if cb.Message != nil {
+		chatID = cb.Message.Chat.ID
+	}
+	if !s.cfg.AllowedChats[chatID] {
+		_ = s.tg.AnswerCallbackQuery(ctx, cb.ID, "Tidak diizinkan.")
+		return
+	}
+	if s.reg == nil {
+		_ = s.tg.AnswerCallbackQuery(ctx, cb.ID, "Fitur izin tidak aktif.")
+		return
+	}
+
+	// callback_data: "a|<reqID>" (izinkan) atau "d|<reqID>" (tolak).
+	verb, reqID, ok := strings.Cut(cb.Data, "|")
+	if !ok {
+		_ = s.tg.AnswerCallbackQuery(ctx, cb.ID, "Data tombol tidak valid.")
+		return
+	}
+	allow := verb == "a"
+
+	_, msgID, resolved := s.reg.Resolve(reqID, allow)
+	if !resolved {
+		_ = s.tg.AnswerCallbackQuery(ctx, cb.ID, "Permintaan sudah kedaluwarsa.")
+		return
+	}
+
+	label := "⛔ DITOLAK"
+	if allow {
+		label = "✅ DIIZINKAN"
+	}
+	_ = s.tg.AnswerCallbackQuery(ctx, cb.ID, strings.TrimSpace(label))
+	if msgID != 0 {
+		_ = s.tg.EditTextClearButtons(ctx, chatID, msgID, "Keputusan izin: "+label)
+	}
+}
+
+func (s *Server) process(msg *telegram.Message) {
+	chatID := msg.Chat.ID
+
+	if !s.cfg.AllowedChats[chatID] {
+		log.Printf("tolak chat tidak diizinkan: chat_id=%d user=%q", chatID, username(msg))
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		_ = s.tg.SendMessage(ctx, chatID,
+			"Maaf, Anda tidak diizinkan memakai bot ini.\nChat ID Anda: "+strconv.FormatInt(chatID, 10))
+		return
+	}
+
+	// Lampiran (foto/dokumen) diproses sebagai prompt dengan berkas terlampir.
+	if len(msg.Photo) > 0 || msg.Document != nil {
+		s.handleAttachment(msg)
+		return
+	}
+
+	text := strings.TrimSpace(msg.Text)
+	if text == "" {
+		return
+	}
+	if strings.HasPrefix(text, "/") {
+		s.handleCommand(chatID, text)
+		return
+	}
+	s.handlePrompt(chatID, text)
+}
+
+func (s *Server) handleCommand(chatID int64, text string) {
+	fields := strings.Fields(text)
+	cmd := strings.SplitN(fields[0], "@", 2)[0] // buang @namabot pada grup
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	switch cmd {
+	case "/start", "/help":
+		_ = s.tg.SendMessage(ctx, chatID, helpText)
+	case "/new", "/reset":
+		if err := s.store.Reset(chatID); err != nil {
+			log.Printf("gagal reset sesi chat_id=%d: %v", chatID, err)
+		}
+		_ = s.tg.SendMessage(ctx, chatID, "Sesi baru dimulai. Konteks percakapan sebelumnya dilupakan.")
+	case "/status":
+		state := "tidak ada (akan memulai sesi baru)"
+		if s.store.Get(chatID) != "" {
+			state = "ada (percakapan dilanjutkan)"
+		}
+		_ = s.tg.SendMessage(ctx, chatID,
+			"Direktori kerja: "+s.cfg.WorkDir+"\nSesi tersimpan: "+state)
+	case "/get":
+		if len(fields) < 2 {
+			_ = s.tg.SendMessage(ctx, chatID, "Penggunaan: /get <path-relatif-ke-workdir>")
+			return
+		}
+		s.handleGet(ctx, chatID, strings.Join(fields[1:], " "))
+	default:
+		_ = s.tg.SendMessage(ctx, chatID, "Perintah tidak dikenal. Ketik /help.")
+	}
+}
+
+// handleGet mengirim sebuah berkas dari dalam workdir ke chat.
+func (s *Server) handleGet(ctx context.Context, chatID int64, rel string) {
+	rel = strings.Trim(rel, `"'`)
+	target := rel
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(s.cfg.WorkDir, rel)
+	}
+	// Cegah keluar dari workdir.
+	absWork, _ := filepath.Abs(s.cfg.WorkDir)
+	absTarget, err := filepath.Abs(target)
+	if err != nil || !strings.HasPrefix(absTarget+string(filepath.Separator), absWork+string(filepath.Separator)) {
+		_ = s.tg.SendMessage(ctx, chatID, "Path harus berada di dalam direktori kerja.")
+		return
+	}
+	if err := s.tg.SendFile(ctx, chatID, absTarget, ""); err != nil {
+		_ = s.tg.SendMessage(ctx, chatID, "Gagal mengirim berkas: "+err.Error())
+	}
+}
+
+// handleAttachment mengunduh foto/dokumen dari Telegram, menyimpannya ke
+// workdir/uploads, lalu menjalankannya sebagai prompt dengan path berkas.
+func (s *Server) handleAttachment(msg *telegram.Message) {
+	chatID := msg.Chat.ID
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	uploads := filepath.Join(s.cfg.WorkDir, "uploads")
+	var paths []string
+
+	if len(msg.Photo) > 0 {
+		largest := msg.Photo[len(msg.Photo)-1] // varian resolusi tertinggi
+		p, err := s.tg.DownloadFile(ctx, largest.FileID, uploads, "")
+		if err != nil {
+			_ = s.tg.SendMessage(ctx, chatID, "Gagal mengunduh foto: "+err.Error())
+			return
+		}
+		paths = append(paths, p)
+	}
+	if msg.Document != nil {
+		p, err := s.tg.DownloadFile(ctx, msg.Document.FileID, uploads, msg.Document.FileName)
+		if err != nil {
+			_ = s.tg.SendMessage(ctx, chatID, "Gagal mengunduh dokumen: "+err.Error())
+			return
+		}
+		paths = append(paths, p)
+	}
+	if len(paths) == 0 {
+		return
+	}
+
+	caption := strings.TrimSpace(msg.Caption)
+	if caption == "" {
+		caption = "Tolong analisis berkas terlampir."
+	}
+	var b strings.Builder
+	b.WriteString(caption)
+	b.WriteString("\n\nBerkas terlampir:")
+	for _, p := range paths {
+		b.WriteString("\n")
+		b.WriteString(p)
+	}
+	s.handlePrompt(chatID, b.String())
+}
+
+func (s *Server) handlePrompt(chatID int64, prompt string) {
+	// Antri agar hanya satu prompt diproses pada satu waktu.
+	select {
+	case s.sem <- struct{}{}:
+	default:
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		_ = s.tg.SendMessage(ctx, chatID, "Sedang memproses prompt lain, mohon tunggu sebentar lalu kirim ulang.")
+		cancel()
+		return
+	}
+	defer func() { <-s.sem }()
+
+	// Tandai chat aktif agar permintaan izin (bila ada) dikirim ke sini.
+	if s.reg != nil {
+		s.reg.Activate(chatID)
+		defer s.reg.Deactivate()
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.Timeout)
+	defer cancel()
+
+	_ = s.tg.SendChatAction(ctx, chatID, "typing")
+	live := newLiveMessage(s.tg, chatID)
+	_ = live.flush(ctx, "⏳ Memproses...")
+
+	var disp strings.Builder
+	sessionID := s.store.Get(chatID)
+
+	res, runErr := s.runner.RunStream(ctx, prompt, sessionID, func(ev claude.StreamEvent) {
+		switch {
+		case ev.AppendText != "":
+			disp.WriteString(ev.AppendText)
+		case ev.ToolName != "":
+			disp.WriteString("\n🔧 ")
+			disp.WriteString(ev.ToolName)
+			disp.WriteString("\n")
+		default:
+			return
+		}
+		if err := live.set(ctx, disp.String()); err != nil {
+			log.Printf("gagal update streaming chat_id=%d: %v", chatID, err)
+		}
+	})
+	if runErr != nil {
+		log.Printf("claude error chat_id=%d: %v", chatID, runErr)
+	}
+
+	if res.SessionID != "" {
+		if err := s.store.Set(chatID, res.SessionID); err != nil {
+			log.Printf("gagal simpan sesi chat_id=%d: %v", chatID, err)
+		}
+	}
+
+	// Gunakan context baru untuk finalisasi; context utama mungkin sudah mepet.
+	sendCtx, sendCancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer sendCancel()
+
+	final := disp.String()
+	if strings.TrimSpace(final) == "" {
+		final = res.Text
+	}
+	if strings.TrimSpace(final) == "" {
+		final = "(tidak ada output)"
+	}
+	if res.IsError {
+		final = "⚠️ " + final
+	}
+	if err := live.flush(sendCtx, final); err != nil {
+		log.Printf("gagal kirim balasan chat_id=%d: %v", chatID, err)
+	}
+
+	// Kirim otomatis gambar yang disebut di output bila berkasnya ada.
+	for _, img := range detectImageFiles(disp.String(), s.cfg.WorkDir) {
+		if err := s.tg.SendFile(sendCtx, chatID, img, ""); err != nil {
+			log.Printf("gagal kirim gambar %q chat_id=%d: %v", img, chatID, err)
+		}
+	}
+}
+
+const helpText = `Halo! Saya jembatan antara Telegram dan Claude Code.
+
+Kirim teks apa pun sebagai prompt, dan saya akan menjalankannya di Claude Code lalu mengirim hasilnya ke sini secara bertahap (streaming). Percakapan dilanjutkan otomatis antar pesan. Anda juga bisa mengirim foto/dokumen untuk dianalisis.
+
+Perintah:
+/new        - mulai sesi baru (lupakan konteks)
+/status     - lihat direktori kerja & status sesi
+/get <path> - kirim berkas dari direktori kerja ke chat
+/help       - tampilkan bantuan ini`
+
+func username(m *telegram.Message) string {
+	if m.From == nil {
+		return ""
+	}
+	if m.From.Username != "" {
+		return "@" + m.From.Username
+	}
+	return m.From.FirstName
+}
