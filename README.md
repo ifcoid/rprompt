@@ -65,9 +65,11 @@ Service menjalankan **server MCP kecil di localhost** (`MCP_ADDR`, default
 dan mengembalikan keputusan Anda ke Claude. Server MCP cukup di localhost — tidak
 perlu diekspos ke internet.
 
-> Format hasil izin (`PERMISSION_RESULT_FORMAT`) defaultnya `behavior`. Kontrak
-> `--permission-prompt-tool` kurang terdokumentasi di Claude Code; bila pada
-> versi Anda tombol tidak berpengaruh, coba ganti ke `hook` tanpa rebuild.
+> Format hasil izin (`PERMISSION_RESULT_FORMAT`) defaultnya `behavior` dan sudah
+> **terverifikasi bekerja** pada Claude Code CLI v2.1.159 (tap "Izinkan" benar-
+> benar membuat Claude menjalankan tool). Kontrak `--permission-prompt-tool`
+> kurang terdokumentasi; bila pada versi lain tombol tidak berpengaruh, ganti ke
+> `hook` tanpa rebuild.
 
 ## Prasyarat
 
