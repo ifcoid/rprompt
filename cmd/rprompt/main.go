@@ -26,6 +26,7 @@ import (
 	"github.com/awangga/rprompt/internal/approval"
 	"github.com/awangga/rprompt/internal/claude"
 	"github.com/awangga/rprompt/internal/config"
+	"github.com/awangga/rprompt/internal/gemini"
 	"github.com/awangga/rprompt/internal/mcpserver"
 	"github.com/awangga/rprompt/internal/server"
 	"github.com/awangga/rprompt/internal/store"
@@ -108,7 +109,18 @@ func main() {
 	apiRunner := *runner
 	apiRunner.PermissionArgs = nil
 
-	srv := server.New(cfg, tg, runner, &apiRunner, st, reg)
+	// Engine Gemini opsional untuk API (routing via field "model").
+	var gem server.GeminiRunner
+	if cfg.GeminiEnabled {
+		gem = gemini.New(cfg.GeminiBin, cfg.GeminiExtraArgs, cfg.GeminiUseOAuth)
+		auth := "API key dari environment"
+		if cfg.GeminiUseOAuth {
+			auth = "login CLI (OAuth; API key di-strip)"
+		}
+		log.Printf("engine Gemini AKTIF (bin %q, auth: %s)", cfg.GeminiBin, auth)
+	}
+
+	srv := server.New(cfg, tg, runner, &apiRunner, gem, st, reg)
 
 	httpSrv := &http.Server{
 		Addr:              cfg.ListenAddr,

@@ -100,17 +100,32 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), s.cfg.Timeout)
 	defer cancel()
 
-	res, runErr := s.apiRunner.RunStream(ctx, prompt, "", nil)
-	if runErr != nil {
-		log.Printf("openai api claude error: %v", runErr)
-	}
-	text := res.Text
-	if strings.TrimSpace(text) == "" {
-		if res.IsError || runErr != nil {
+	// Pilih engine berdasarkan field "model": "gemini..." -> Gemini, selain itu
+	// -> Claude. Keduanya stateless & memakai direktori kerja default.
+	var text string
+	if isGeminiModel(req.Model) {
+		if s.gemini == nil {
+			writeOpenAIError(w, http.StatusBadRequest,
+				"model Gemini tidak diaktifkan (set GEMINI_ENABLED=true)", "invalid_request_error")
+			return
+		}
+		out, err := s.gemini.Run(ctx, prompt, s.cfg.WorkDir)
+		if err != nil {
+			log.Printf("openai api gemini error: %v", err)
+			writeOpenAIError(w, http.StatusBadGateway, "Gemini error: "+err.Error(), "api_error")
+			return
+		}
+		text = out
+	} else {
+		res, runErr := s.apiRunner.RunStream(ctx, prompt, "", s.cfg.WorkDir, nil)
+		if runErr != nil {
+			log.Printf("openai api claude error: %v", runErr)
+		}
+		if strings.TrimSpace(res.Text) == "" && (res.IsError || runErr != nil) {
 			writeOpenAIError(w, http.StatusBadGateway, "Claude melaporkan error", "api_error")
 			return
 		}
-		text = ""
+		text = res.Text
 	}
 
 	model := req.Model
@@ -137,18 +152,29 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "API key tidak valid", "invalid_request_error")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"object": "list",
-		"data": []map[string]any{{
-			"id":       apiModelName,
+	data := []map[string]any{{
+		"id":       apiModelName,
+		"object":   "model",
+		"created":  0,
+		"owned_by": "anthropic",
+	}}
+	if s.gemini != nil {
+		data = append(data, map[string]any{
+			"id":       "gemini-2.5-flash",
 			"object":   "model",
 			"created":  0,
-			"owned_by": "anthropic",
-		}},
-	})
+			"owned_by": "google",
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
 }
 
 // --- Helper ---
+
+// isGeminiModel mengembalikan true bila nama model menunjuk ke engine Gemini.
+func isGeminiModel(model string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "gemini")
+}
 
 // buildPrompt meratakan messages OpenAI menjadi satu prompt untuk claude -p.
 // Pesan system diprepend; satu pesan user tunggal dikirim apa adanya; percakapan

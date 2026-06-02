@@ -26,6 +26,8 @@ update Telegram diverifikasi dengan `secret_token`.
   Telegram (rolling ke pesan baru bila melebihi 4096 karakter), termasuk
   indikator tool yang sedang dipakai (mis. `🔧 Bash`).
 - **Kontinuitas sesi** — percakapan dilanjutkan otomatis; `/new` untuk reset.
+- **Pindah direktori dari Telegram** — `/cd`, `/project` (whitelist), `/pwd`;
+  tiap chat punya direktori kerja sendiri (lihat di bawah).
 - **Kirim gambar otomatis** — bila jawaban menyebut path berkas gambar yang ada
   di direktori kerja, gambarnya ikut dikirim.
 - **Unggah dari HP** — kirim foto/dokumen ke bot; berkas diunduh ke
@@ -36,6 +38,8 @@ update Telegram diverifikasi dengan `secret_token`.
   tombol Telegram (lihat di bawah).
 - **HTTP API OpenAI-compatible** — opsional: `POST /v1/chat/completions` agar
   aplikasi/SDK OpenAI bisa prompting ke Claude (lihat di bawah).
+- **Engine ganda di API** — opsional: pilih Claude atau **Gemini CLI** lewat
+  field `model` pada endpoint OpenAI yang sama.
 - **Whitelist + secret token**, antrian 1 prompt, shutdown rapi.
 
 ### Izin tool
@@ -133,14 +137,30 @@ Claude Code, dan hasilnya dikirim balik ke Telegram.
 
 ## Perintah bot
 
-| Perintah      | Fungsi                                             |
-| ------------- | -------------------------------------------------- |
-| `/help`       | Tampilkan bantuan                                  |
-| `/new`        | Mulai sesi baru (lupakan konteks percakapan)       |
-| `/status`     | Lihat direktori kerja & status sesi                |
-| `/get <path>` | Kirim berkas dari direktori kerja ke chat          |
-| foto/dokumen  | Diunduh & diteruskan ke Claude untuk dianalisis    |
-| teks lain     | Dikirim sebagai prompt ke Claude Code              |
+| Perintah          | Fungsi                                              |
+| ----------------- | --------------------------------------------------- |
+| `/help`           | Tampilkan bantuan                                   |
+| `/new`            | Mulai sesi baru (lupakan konteks percakapan)        |
+| `/status`         | Lihat direktori kerja & status sesi                 |
+| `/pwd`            | Lihat direktori kerja saat ini                      |
+| `/cd <path>`      | Pindah direktori kerja (path bebas)                 |
+| `/project [nama]` | Pindah ke proyek terdaftar (tanpa nama = daftar)    |
+| `/get <path>`     | Kirim berkas dari direktori kerja ke chat           |
+| foto/dokumen      | Diunduh & diteruskan ke Claude untuk dianalisis     |
+| teks lain         | Dikirim sebagai prompt ke Claude Code               |
+
+### Pindah direktori kerja dari Telegram
+
+Tiap chat punya direktori kerja sendiri (default `WORK_DIR`). Ubah saat itu juga
+tanpa restart:
+
+- `/cd C:/proyek/x` — pindah ke path bebas (folder harus ada).
+- `/project web` — pindah ke proyek dari **whitelist** `PROJECTS` di `.env`
+  (mis. `PROJECTS=web=C:/proyek/web;api=C:/proyek/api`). `/project` tanpa nama
+  menampilkan daftar. Lebih aman karena Claude hanya bisa diarahkan ke folder
+  yang Anda daftarkan.
+- `/pwd` — lihat folder aktif. Perubahan berlaku untuk prompt, `/get`, dan
+  unggahan berikutnya pada chat itu. (Reset ke default saat service di-restart.)
 
 ## HTTP API (OpenAI-compatible)
 
@@ -188,8 +208,10 @@ print(resp.choices[0].message.content)
 - **Stateless** (sesuai OpenAI): kirim seluruh `messages` tiap request. rprompt
   meratakannya jadi satu prompt dan menjalankan `claude -p` sebagai sesi baru —
   tidak ada kontinuitas sesi otomatis seperti di Telegram.
-- **Field `model` diabaikan** (di-echo di respons); model mengikuti langganan
-  Claude pada CLI. `/v1/models` mengiklankan id `claude-code`.
+- **Field `model` memilih engine** (lihat Gemini di bawah): `model` diawali
+  `gemini` → Gemini CLI; selain itu → Claude (default `claude-code`). Untuk
+  Claude, nama model spesifik diabaikan (model ikut langganan CLI). `/v1/models`
+  mengiklankan `claude-code` (dan `gemini-2.5-flash` bila Gemini aktif).
 - **Streaming belum didukung** — `stream=true` dibalas error `400`. Pakai
   `stream=false` (default).
 - **Token usage** dilaporkan `0` (tidak dilacak).
@@ -200,6 +222,38 @@ print(resp.choices[0].message.content)
   `INTERACTIVE_PERMISSIONS=true`, tool via API mengikuti `CLAUDE_EXTRA_ARGS`
   (mis. `--permission-mode acceptEdits`). Konkurensi tinggi berbagi
   kuota/rate-limit langganan Claude Anda.
+
+### Engine Gemini (opsional)
+
+API yang sama bisa **diteruskan ke Gemini CLI** dengan memilih `model`. Aktifkan
+dengan `GEMINI_ENABLED=true`, dan pastikan Gemini CLI terpasang & terotentikasi:
+
+```sh
+npm install -g @google/gemini-cli      # butuh Node 20+
+gemini                                  # login Google sekali (OAuth), atau set GEMINI_API_KEY
+```
+
+Lalu cukup ganti `model` pada request yang sama:
+
+```python
+client.chat.completions.create(model="gemini-2.5-flash",
+    messages=[{"role": "user", "content": "Halo"}])   # -> dijalankan oleh Gemini
+```
+
+- `model` diawali `gemini` → Gemini; selain itu → Claude. Satu base_url, dua engine.
+- Gemini dipanggil headless (prompt via stdin) `gemini --output-format json` +
+  `GEMINI_EXTRA_ARGS`; rprompt mem-parse field `response`. Disarankan
+  `GEMINI_EXTRA_ARGS=-m gemini-2.5-flash --approval-mode yolo`.
+- **Auth:** memakai login `gemini` yang sudah ada (`~/.gemini`) **atau**
+  `GEMINI_API_KEY` — API key tidak wajib bila sudah login. Pastikan rprompt jalan
+  sebagai user yang login (agar bisa baca `~/.gemini`). Bila `GEMINI_API_KEY`
+  terlanjur ter-set di environment tapi Anda ingin memakai **login CLI**, set
+  `GEMINI_USE_OAUTH=true` — rprompt akan menghapus key itu dari subprocess gemini.
+- **Windows:** `GEMINI_BIN` umumnya shim npm `.cmd` (mis.
+  `…\AppData\Roaming\npm\gemini.cmd`; Go menjalankannya via `cmd /c`), dan folder
+  Node (mis. `C:\Program Files\nodejs`) **harus ada di PATH** karena `gemini.cmd`
+  memanggil `node`.
+- Jalur Gemini juga **stateless** & berbagi batas konkurensi API yang sama.
 
 ## Pengembangan
 

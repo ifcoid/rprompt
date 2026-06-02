@@ -20,11 +20,18 @@ type Config struct {
 	WebhookPath   string         // path endpoint webhook, mis. "/telegram/webhook"
 	WebhookURL    string         // base URL publik (tanpa path), mis. "https://xxx.trycloudflare.com"
 	WebhookSecret string         // secret_token yang divalidasi pada setiap update
-	ClaudeBin     string         // path binary claude
-	WorkDir       string         // direktori kerja tempat claude dijalankan
-	ExtraArgs     []string       // argumen tambahan untuk claude, mis. --dangerously-skip-permissions
-	SessionFile   string         // file penyimpanan session id per chat
-	Timeout       time.Duration  // batas waktu eksekusi satu prompt
+	ClaudeBin     string            // path binary claude
+	WorkDir       string            // direktori kerja default tempat claude dijalankan
+	Projects      map[string]string // nama -> path folder (whitelist untuk /project)
+	ExtraArgs     []string          // argumen tambahan untuk claude, mis. --dangerously-skip-permissions
+	SessionFile   string            // file penyimpanan session id per chat
+	Timeout       time.Duration     // batas waktu eksekusi satu prompt
+
+	// Gemini CLI (opsional) untuk routing via field "model" di API.
+	GeminiEnabled   bool     // aktifkan engine Gemini
+	GeminiBin       string   // path binary gemini
+	GeminiExtraArgs []string // argumen tambahan untuk gemini
+	GeminiUseOAuth  bool     // paksa login CLI (strip GEMINI_API_KEY/GOOGLE_API_KEY)
 
 	// Izin interaktif via tombol Telegram.
 	Interactive     bool          // aktifkan persetujuan izin tool via Telegram
@@ -82,6 +89,28 @@ func Load() (*Config, error) {
 
 	if extra := strings.TrimSpace(os.Getenv("CLAUDE_EXTRA_ARGS")); extra != "" {
 		c.ExtraArgs = strings.Fields(extra)
+	}
+
+	// PROJECTS: daftar whitelist "nama=path;nama2=path2" untuk perintah /project.
+	c.Projects = map[string]string{}
+	for _, pair := range strings.Split(os.Getenv("PROJECTS"), ";") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		name, path, ok := strings.Cut(pair, "=")
+		name, path = strings.TrimSpace(name), strings.TrimSpace(path)
+		if !ok || name == "" || path == "" {
+			return nil, fmt.Errorf("PROJECTS tidak valid pada %q (format: nama=path;nama2=path2)", pair)
+		}
+		c.Projects[name] = path
+	}
+
+	c.GeminiEnabled = isTrue(os.Getenv("GEMINI_ENABLED"))
+	c.GeminiBin = getenv("GEMINI_BIN", "gemini")
+	c.GeminiUseOAuth = isTrue(os.Getenv("GEMINI_USE_OAUTH"))
+	if g := strings.TrimSpace(os.Getenv("GEMINI_EXTRA_ARGS")); g != "" {
+		c.GeminiExtraArgs = strings.Fields(g)
 	}
 
 	secs := getenv("CLAUDE_TIMEOUT_SECONDS", "600")

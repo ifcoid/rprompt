@@ -15,13 +15,15 @@ import (
 
 // fakeRunner mengimplementasikan promptRunner tanpa menjalankan claude.
 type fakeRunner struct {
-	result    claude.Result
-	err       error
-	gotPrompt string
+	result     claude.Result
+	err        error
+	gotPrompt  string
+	gotWorkDir string
 }
 
-func (f *fakeRunner) RunStream(_ context.Context, prompt, _ string, _ func(claude.StreamEvent)) (claude.Result, error) {
+func (f *fakeRunner) RunStream(_ context.Context, prompt, _, workDir string, _ func(claude.StreamEvent)) (claude.Result, error) {
 	f.gotPrompt = prompt
+	f.gotWorkDir = workDir
 	return f.result, f.err
 }
 
@@ -31,15 +33,27 @@ type blockingRunner struct {
 	release chan struct{}
 }
 
-func (b *blockingRunner) RunStream(_ context.Context, _, _ string, _ func(claude.StreamEvent)) (claude.Result, error) {
+func (b *blockingRunner) RunStream(_ context.Context, _, _, _ string, _ func(claude.StreamEvent)) (claude.Result, error) {
 	b.started <- struct{}{}
 	<-b.release
 	return claude.Result{Text: "done"}, nil
 }
 
+// fakeGemini mengimplementasikan GeminiRunner.
+type fakeGemini struct {
+	out       string
+	err       error
+	gotPrompt string
+}
+
+func (g *fakeGemini) Run(_ context.Context, prompt, _ string) (string, error) {
+	g.gotPrompt = prompt
+	return g.out, g.err
+}
+
 func newAPITestServer(runner promptRunner) *Server {
 	return &Server{
-		cfg:       &config.Config{APIEnabled: true, APIToken: "rahasia", Timeout: 5 * time.Second},
+		cfg:       &config.Config{APIEnabled: true, APIToken: "rahasia", WorkDir: "/wd", Timeout: 5 * time.Second},
 		apiRunner: runner,
 		// apiSem nil = paralel tak terbatas
 	}
@@ -124,6 +138,42 @@ func TestChatSuccess(t *testing.T) {
 	// system + user diratakan jadi satu prompt.
 	if runner.gotPrompt != "be brief\n\nhello" {
 		t.Errorf("prompt diratakan salah: %q", runner.gotPrompt)
+	}
+	if runner.gotWorkDir != "/wd" {
+		t.Errorf("workDir harus diteruskan ke runner, dapat %q", runner.gotWorkDir)
+	}
+}
+
+func TestChatGeminiRouting(t *testing.T) {
+	claudeR := &fakeRunner{result: claude.Result{Text: "dari claude"}}
+	gem := &fakeGemini{out: "dari gemini"}
+	s := newAPITestServer(claudeR)
+	s.gemini = gem
+
+	body := `{"model":"gemini-2.5-flash","messages":[{"role":"user","content":"hai"}]}`
+	rr := doChat(s, http.MethodPost, "Bearer rahasia", body)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("harus 200, dapat %d (%s)", rr.Code, rr.Body.String())
+	}
+	var resp chatCompletionResponse
+	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	if resp.Choices[0].Message.Content != "dari gemini" {
+		t.Errorf("harus dijawab Gemini, dapat %q", resp.Choices[0].Message.Content)
+	}
+	if gem.gotPrompt != "hai" {
+		t.Errorf("Gemini menerima prompt %q", gem.gotPrompt)
+	}
+	if claudeR.gotPrompt != "" {
+		t.Errorf("Claude tidak boleh dipanggil untuk model gemini")
+	}
+}
+
+func TestChatGeminiDisabled(t *testing.T) {
+	s := newAPITestServer(&fakeRunner{}) // s.gemini nil
+	body := `{"model":"gemini-2.5-pro","messages":[{"role":"user","content":"hai"}]}`
+	rr := doChat(s, http.MethodPost, "Bearer rahasia", body)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("model gemini tanpa GEMINI_ENABLED harus 400, dapat %d", rr.Code)
 	}
 }
 
