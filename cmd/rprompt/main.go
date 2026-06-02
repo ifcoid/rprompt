@@ -151,6 +151,13 @@ func main() {
 			log.Fatalf("set webhook otomatis gagal: %v", err)
 		}
 		log.Printf("webhook otomatis terdaftar: %s%s", tun.URL, cfg.WebhookPath)
+	} else if cfg.SetWebhookOnStart {
+		// URL tetap (mis. domain/named-tunnel di depan container): daftarkan
+		// sekali saat start. Tidak dihapus saat shutdown karena URL permanen.
+		if err := registerWebhook(tg, cfg.WebhookURL+cfg.WebhookPath, cfg.WebhookSecret); err != nil {
+			log.Fatalf("set webhook saat start gagal: %v", err)
+		}
+		log.Printf("webhook terdaftar: %s%s", cfg.WebhookURL, cfg.WebhookPath)
 	}
 
 	// Tunggu sinyal untuk shutdown rapi.

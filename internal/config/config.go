@@ -37,6 +37,9 @@ type Config struct {
 	AutoTunnel     bool   // jalankan cloudflared sendiri lalu set-webhook otomatis
 	CloudflaredBin string // path binary cloudflared
 
+	// Daftarkan webhook ke WEBHOOK_URL saat start (untuk URL tetap, mis. di Docker).
+	SetWebhookOnStart bool
+
 	// HTTP API untuk aplikasi lain (POST /api/prompt).
 	APIEnabled       bool   // aktifkan endpoint API
 	APIToken         string // token Bearer yang wajib pada setiap request API
@@ -104,6 +107,10 @@ func Load() (*Config, error) {
 
 	c.AutoTunnel = isTrue(os.Getenv("AUTO_TUNNEL"))
 	c.CloudflaredBin = getenv("CLOUDFLARED_BIN", "cloudflared")
+	c.SetWebhookOnStart = isTrue(os.Getenv("SET_WEBHOOK_ON_START"))
+	if c.SetWebhookOnStart && !c.AutoTunnel && c.WebhookURL == "" {
+		return nil, fmt.Errorf("WEBHOOK_URL wajib diisi bila SET_WEBHOOK_ON_START=true")
+	}
 
 	c.APIEnabled = isTrue(os.Getenv("API_ENABLED"))
 	c.APIToken = os.Getenv("API_TOKEN")

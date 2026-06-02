@@ -15,28 +15,17 @@ import (
 
 // fakeRunner mengimplementasikan promptRunner tanpa menjalankan claude.
 type fakeRunner struct {
-	result       claude.Result
-	err          error
-	gotPrompt    string
-	gotSessionIn string
+	result    claude.Result
+	err       error
+	gotPrompt string
 }
 
-func (f *fakeRunner) RunStream(_ context.Context, prompt, sessionID string, _ func(claude.StreamEvent)) (claude.Result, error) {
+func (f *fakeRunner) RunStream(_ context.Context, prompt, _ string, _ func(claude.StreamEvent)) (claude.Result, error) {
 	f.gotPrompt = prompt
-	f.gotSessionIn = sessionID
 	return f.result, f.err
 }
 
-func newAPITestServer(runner promptRunner) *Server {
-	return &Server{
-		cfg:       &config.Config{APIEnabled: true, APIToken: "rahasia", Timeout: 5 * time.Second},
-		apiRunner: runner,
-		// apiSem nil = tak terbatas (paralel penuh)
-	}
-}
-
-// blockingRunner menahan eksekusi sampai release ditutup; dipakai menguji
-// paralelisme.
+// blockingRunner menahan eksekusi sampai release ditutup; untuk uji paralelisme.
 type blockingRunner struct {
 	started chan struct{}
 	release chan struct{}
@@ -45,80 +34,107 @@ type blockingRunner struct {
 func (b *blockingRunner) RunStream(_ context.Context, _, _ string, _ func(claude.StreamEvent)) (claude.Result, error) {
 	b.started <- struct{}{}
 	<-b.release
-	return claude.Result{Text: "done", SessionID: "s"}, nil
+	return claude.Result{Text: "done"}, nil
 }
 
-func doAPI(s *Server, method, auth, body string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(method, "/api/prompt", strings.NewReader(body))
+func newAPITestServer(runner promptRunner) *Server {
+	return &Server{
+		cfg:       &config.Config{APIEnabled: true, APIToken: "rahasia", Timeout: 5 * time.Second},
+		apiRunner: runner,
+		// apiSem nil = paralel tak terbatas
+	}
+}
+
+func doChat(s *Server, method, auth, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, "/v1/chat/completions", strings.NewReader(body))
 	if auth != "" {
 		req.Header.Set("Authorization", auth)
 	}
 	rr := httptest.NewRecorder()
-	s.handleAPIPrompt(rr, req)
+	s.handleChatCompletions(rr, req)
 	return rr
 }
 
-func TestAPIMethodNotAllowed(t *testing.T) {
+func TestChatMethodNotAllowed(t *testing.T) {
 	s := newAPITestServer(&fakeRunner{})
-	if rr := doAPI(s, http.MethodGet, "Bearer rahasia", ""); rr.Code != http.StatusMethodNotAllowed {
+	if rr := doChat(s, http.MethodGet, "Bearer rahasia", ""); rr.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("GET harus 405, dapat %d", rr.Code)
 	}
 }
 
-func TestAPIUnauthorized(t *testing.T) {
+func TestChatUnauthorized(t *testing.T) {
 	s := newAPITestServer(&fakeRunner{})
-	cases := []string{"", "Bearer salah", "rahasia", "Basic rahasia"}
-	for _, auth := range cases {
-		rr := doAPI(s, http.MethodPost, auth, `{"prompt":"hai"}`)
-		if rr.Code != http.StatusUnauthorized {
+	for _, auth := range []string{"", "Bearer salah", "rahasia"} {
+		body := `{"messages":[{"role":"user","content":"hai"}]}`
+		if rr := doChat(s, http.MethodPost, auth, body); rr.Code != http.StatusUnauthorized {
 			t.Errorf("auth %q harus 401, dapat %d", auth, rr.Code)
 		}
 	}
 }
 
-func TestAPIBadJSON(t *testing.T) {
+func TestChatBadJSON(t *testing.T) {
 	s := newAPITestServer(&fakeRunner{})
-	if rr := doAPI(s, http.MethodPost, "Bearer rahasia", "bukan json"); rr.Code != http.StatusBadRequest {
+	if rr := doChat(s, http.MethodPost, "Bearer rahasia", "bukan json"); rr.Code != http.StatusBadRequest {
 		t.Fatalf("JSON rusak harus 400, dapat %d", rr.Code)
 	}
 }
 
-func TestAPIEmptyPrompt(t *testing.T) {
+func TestChatEmptyMessages(t *testing.T) {
 	s := newAPITestServer(&fakeRunner{})
-	if rr := doAPI(s, http.MethodPost, "Bearer rahasia", `{"prompt":"   "}`); rr.Code != http.StatusBadRequest {
-		t.Fatalf("prompt kosong harus 400, dapat %d", rr.Code)
+	if rr := doChat(s, http.MethodPost, "Bearer rahasia", `{"messages":[]}`); rr.Code != http.StatusBadRequest {
+		t.Fatalf("messages kosong harus 400, dapat %d", rr.Code)
 	}
 }
 
-func TestAPISuccess(t *testing.T) {
-	runner := &fakeRunner{result: claude.Result{Text: "halo balik", SessionID: "sess-9"}}
+func TestChatStreamRejected(t *testing.T) {
+	s := newAPITestServer(&fakeRunner{})
+	body := `{"stream":true,"messages":[{"role":"user","content":"hai"}]}`
+	rr := doChat(s, http.MethodPost, "Bearer rahasia", body)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("stream=true harus 400, dapat %d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "error") {
+		t.Errorf("balasan harus format error OpenAI: %s", rr.Body.String())
+	}
+}
+
+func TestChatSuccess(t *testing.T) {
+	runner := &fakeRunner{result: claude.Result{Text: "hi there"}}
 	s := newAPITestServer(runner)
 
-	rr := doAPI(s, http.MethodPost, "Bearer rahasia", `{"prompt":"halo","session_id":"sess-1"}`)
+	body := `{"model":"gpt-4o","messages":[{"role":"system","content":"be brief"},{"role":"user","content":"hello"}]}`
+	rr := doChat(s, http.MethodPost, "Bearer rahasia", body)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("harus 200, dapat %d (%s)", rr.Code, rr.Body.String())
 	}
-	var resp apiPromptResponse
+	var resp chatCompletionResponse
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("respons bukan JSON valid: %v", err)
 	}
-	if resp.Result != "halo balik" || resp.SessionID != "sess-9" || resp.IsError {
-		t.Errorf("respons tak sesuai: %#v", resp)
+	if resp.Object != "chat.completion" {
+		t.Errorf("object=%q", resp.Object)
 	}
-	// Pastikan prompt & session diteruskan ke runner.
-	if runner.gotPrompt != "halo" || runner.gotSessionIn != "sess-1" {
-		t.Errorf("runner menerima prompt=%q session=%q", runner.gotPrompt, runner.gotSessionIn)
+	if resp.Model != "gpt-4o" {
+		t.Errorf("model harus di-echo, dapat %q", resp.Model)
+	}
+	if len(resp.Choices) != 1 || resp.Choices[0].Message.Content != "hi there" ||
+		resp.Choices[0].Message.Role != "assistant" || resp.Choices[0].FinishReason != "stop" {
+		t.Fatalf("choices tak sesuai: %#v", resp.Choices)
+	}
+	// system + user diratakan jadi satu prompt.
+	if runner.gotPrompt != "be brief\n\nhello" {
+		t.Errorf("prompt diratakan salah: %q", runner.gotPrompt)
 	}
 }
 
-func TestAPIRunsInParallel(t *testing.T) {
+func TestChatRunsInParallel(t *testing.T) {
 	br := &blockingRunner{started: make(chan struct{}, 2), release: make(chan struct{})}
-	s := newAPITestServer(br) // apiSem nil = tak terbatas
+	s := newAPITestServer(br)
 
-	go doAPI(s, http.MethodPost, "Bearer rahasia", `{"prompt":"a"}`)
-	go doAPI(s, http.MethodPost, "Bearer rahasia", `{"prompt":"b"}`)
+	body := `{"messages":[{"role":"user","content":"x"}]}`
+	go doChat(s, http.MethodPost, "Bearer rahasia", body)
+	go doChat(s, http.MethodPost, "Bearer rahasia", body)
 
-	// Kedua request harus mulai SEBELUM ada yang dilepas → bukti paralel.
 	for i := 0; i < 2; i++ {
 		select {
 		case <-br.started:
@@ -129,33 +145,73 @@ func TestAPIRunsInParallel(t *testing.T) {
 	close(br.release)
 }
 
-func TestAPIConcurrencyLimit(t *testing.T) {
+func TestChatConcurrencyLimit(t *testing.T) {
 	br := &blockingRunner{started: make(chan struct{}, 2), release: make(chan struct{})}
 	s := newAPITestServer(br)
-	s.apiSem = make(chan struct{}, 1) // batas 1
+	s.apiSem = make(chan struct{}, 1)
 
-	go doAPI(s, http.MethodPost, "Bearer rahasia", `{"prompt":"a"}`)
-	<-br.started // request pertama memegang satu-satunya slot
+	body := `{"messages":[{"role":"user","content":"x"}]}`
+	go doChat(s, http.MethodPost, "Bearer rahasia", body)
+	<-br.started // slot satu-satunya terpakai
 
-	// Request kedua harus langsung 429 (penuh), bukan menunggu.
-	rr := doAPI(s, http.MethodPost, "Bearer rahasia", `{"prompt":"b"}`)
+	rr := doChat(s, http.MethodPost, "Bearer rahasia", body)
 	if rr.Code != http.StatusTooManyRequests {
 		t.Fatalf("saat penuh harus 429, dapat %d", rr.Code)
 	}
 	close(br.release)
 }
 
-func TestAPIClaudeError(t *testing.T) {
-	runner := &fakeRunner{result: claude.Result{Text: "boom", SessionID: "s", IsError: true}}
-	s := newAPITestServer(runner)
-
-	rr := doAPI(s, http.MethodPost, "Bearer rahasia", `{"prompt":"x"}`)
+func TestModels(t *testing.T) {
+	s := newAPITestServer(&fakeRunner{})
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	req.Header.Set("Authorization", "Bearer rahasia")
+	rr := httptest.NewRecorder()
+	s.handleModels(rr, req)
 	if rr.Code != http.StatusOK {
-		t.Fatalf("harus 200 (error level claude), dapat %d", rr.Code)
+		t.Fatalf("harus 200, dapat %d", rr.Code)
 	}
-	var resp apiPromptResponse
-	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
-	if !resp.IsError {
-		t.Errorf("is_error harus true, dapat %#v", resp)
+	if !strings.Contains(rr.Body.String(), apiModelName) {
+		t.Errorf("daftar model harus memuat %q: %s", apiModelName, rr.Body.String())
+	}
+}
+
+func TestBuildPrompt(t *testing.T) {
+	cases := []struct {
+		name string
+		msgs []chatMessage
+		want string
+	}{
+		{
+			"user tunggal",
+			[]chatMessage{{Role: "user", Content: json.RawMessage(`"halo"`)}},
+			"halo",
+		},
+		{
+			"system + user",
+			[]chatMessage{
+				{Role: "system", Content: json.RawMessage(`"S"`)},
+				{Role: "user", Content: json.RawMessage(`"U"`)},
+			},
+			"S\n\nU",
+		},
+		{
+			"banyak giliran",
+			[]chatMessage{
+				{Role: "user", Content: json.RawMessage(`"a"`)},
+				{Role: "assistant", Content: json.RawMessage(`"b"`)},
+				{Role: "user", Content: json.RawMessage(`"c"`)},
+			},
+			"User: a\n\nAssistant: b\n\nUser: c",
+		},
+		{
+			"content array",
+			[]chatMessage{{Role: "user", Content: json.RawMessage(`[{"type":"text","text":"x"},{"type":"text","text":"y"}]`)}},
+			"xy",
+		},
+	}
+	for _, c := range cases {
+		if got := buildPrompt(c.msgs); got != c.want {
+			t.Errorf("%s: dapat %q, mau %q", c.name, got, c.want)
+		}
 	}
 }

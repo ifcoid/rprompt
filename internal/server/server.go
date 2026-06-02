@@ -67,7 +67,9 @@ func (s *Server) Handler() http.Handler {
 		_, _ = w.Write([]byte("ok"))
 	})
 	if s.cfg.APIEnabled {
-		mux.HandleFunc("/api/prompt", s.handleAPIPrompt)
+		// API OpenAI-compatible (non-streaming).
+		mux.HandleFunc("/v1/chat/completions", s.handleChatCompletions)
+		mux.HandleFunc("/v1/models", s.handleModels)
 	}
 	return mux
 }

@@ -1,59 +1,98 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 )
 
-// apiPromptRequest adalah body JSON untuk POST /api/prompt.
-type apiPromptRequest struct {
-	Prompt    string `json:"prompt"`
-	SessionID string `json:"session_id"` // opsional: lanjutkan percakapan
+// apiModelName adalah nama model yang diiklankan endpoint OpenAI-compatible.
+// Model sebenarnya mengikuti langganan Claude pada CLI.
+const apiModelName = "claude-code"
+
+// --- Tipe request/response ala OpenAI Chat Completions ---
+
+type chatMessage struct {
+	Role    string          `json:"role"`
+	Content json.RawMessage `json:"content"` // string ATAU array bagian konten
 }
 
-// apiPromptResponse adalah respons JSON.
-type apiPromptResponse struct {
-	Result    string `json:"result"`
-	SessionID string `json:"session_id"`
-	IsError   bool   `json:"is_error"`
+type chatCompletionRequest struct {
+	Model    string        `json:"model"`
+	Messages []chatMessage `json:"messages"`
+	Stream   bool          `json:"stream"`
 }
 
-// handleAPIPrompt menjalankan satu prompt melalui Claude Code dan mengembalikan
-// hasil akhirnya sebagai JSON. Caller mengelola session_id sendiri (stateless di
-// sisi server). Memerlukan header Authorization: Bearer <API_TOKEN>.
-func (s *Server) handleAPIPrompt(w http.ResponseWriter, r *http.Request) {
+type chatCompletionResponse struct {
+	ID      string       `json:"id"`
+	Object  string       `json:"object"`
+	Created int64        `json:"created"`
+	Model   string       `json:"model"`
+	Choices []chatChoice `json:"choices"`
+	Usage   chatUsage    `json:"usage"`
+}
+
+type chatChoice struct {
+	Index        int             `json:"index"`
+	Message      chatRespMessage `json:"message"`
+	FinishReason string          `json:"finish_reason"`
+}
+
+type chatRespMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type chatUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
+// --- Handler ---
+
+// handleChatCompletions mengimplementasikan POST /v1/chat/completions ala
+// OpenAI (non-streaming). Stateless: messages diratakan jadi satu prompt dan
+// dijalankan sebagai sesi baru. Auth: Authorization: Bearer <API_TOKEN>.
+func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeJSONError(w, http.StatusMethodNotAllowed, "gunakan POST")
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "gunakan POST", "invalid_request_error")
 		return
 	}
 	if !s.apiAuthorized(r) {
-		writeJSONError(w, http.StatusUnauthorized, "token tidak valid")
+		writeOpenAIError(w, http.StatusUnauthorized, "API key tidak valid", "invalid_request_error")
 		return
 	}
 
-	var req apiPromptRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "JSON tidak valid")
+	var req chatCompletionRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20)).Decode(&req); err != nil {
+		writeOpenAIError(w, http.StatusBadRequest, "JSON tidak valid", "invalid_request_error")
 		return
 	}
-	prompt := strings.TrimSpace(req.Prompt)
+	if req.Stream {
+		writeOpenAIError(w, http.StatusBadRequest,
+			"streaming tidak didukung; gunakan stream=false", "invalid_request_error")
+		return
+	}
+	prompt := buildPrompt(req.Messages)
 	if prompt == "" {
-		writeJSONError(w, http.StatusBadRequest, "field 'prompt' wajib diisi")
+		writeOpenAIError(w, http.StatusBadRequest, "'messages' kosong atau tanpa teks", "invalid_request_error")
 		return
 	}
 
-	// API berjalan paralel (tidak diantrikan). Bila batas konkurensi diset dan
-	// penuh, tolak segera dengan 429 alih-alih membuat caller menunggu.
+	// Paralel (tidak diantrikan): bila batas konkurensi penuh, tolak segera.
 	if s.apiSem != nil {
 		select {
 		case s.apiSem <- struct{}{}:
 			defer func() { <-s.apiSem }()
 		default:
-			writeJSONError(w, http.StatusTooManyRequests, "kapasitas API penuh, coba lagi")
+			writeOpenAIError(w, http.StatusTooManyRequests, "kapasitas penuh, coba lagi", "rate_limit_error")
 			return
 		}
 	}
@@ -61,24 +100,117 @@ func (s *Server) handleAPIPrompt(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), s.cfg.Timeout)
 	defer cancel()
 
-	res, runErr := s.apiRunner.RunStream(ctx, prompt, req.SessionID, nil)
+	res, runErr := s.apiRunner.RunStream(ctx, prompt, "", nil)
 	if runErr != nil {
-		log.Printf("api claude error: %v", runErr)
+		log.Printf("openai api claude error: %v", runErr)
 	}
-
 	text := res.Text
 	if strings.TrimSpace(text) == "" {
 		if res.IsError || runErr != nil {
-			text = "Claude melaporkan error."
-		} else {
-			text = "(tidak ada output)"
+			writeOpenAIError(w, http.StatusBadGateway, "Claude melaporkan error", "api_error")
+			return
+		}
+		text = ""
+	}
+
+	model := req.Model
+	if model == "" {
+		model = apiModelName
+	}
+	writeJSON(w, http.StatusOK, chatCompletionResponse{
+		ID:      "chatcmpl-" + strconv.FormatInt(time.Now().UnixNano(), 36),
+		Object:  "chat.completion",
+		Created: time.Now().Unix(),
+		Model:   model,
+		Choices: []chatChoice{{
+			Index:        0,
+			Message:      chatRespMessage{Role: "assistant", Content: text},
+			FinishReason: "stop",
+		}},
+		Usage: chatUsage{}, // token tidak dilacak (mengikuti claude CLI)
+	})
+}
+
+// handleModels mengimplementasikan GET /v1/models (sebagian klien memerlukannya).
+func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
+	if !s.apiAuthorized(r) {
+		writeOpenAIError(w, http.StatusUnauthorized, "API key tidak valid", "invalid_request_error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"object": "list",
+		"data": []map[string]any{{
+			"id":       apiModelName,
+			"object":   "model",
+			"created":  0,
+			"owned_by": "anthropic",
+		}},
+	})
+}
+
+// --- Helper ---
+
+// buildPrompt meratakan messages OpenAI menjadi satu prompt untuk claude -p.
+// Pesan system diprepend; satu pesan user tunggal dikirim apa adanya; percakapan
+// banyak-giliran dirender sebagai transkrip berlabel.
+func buildPrompt(messages []chatMessage) string {
+	var systems []string
+	var convo []chatMessage
+	for _, m := range messages {
+		if m.Role == "system" {
+			if t := messageText(m.Content); t != "" {
+				systems = append(systems, t)
+			}
+			continue
+		}
+		convo = append(convo, m)
+	}
+
+	var b strings.Builder
+	if len(systems) > 0 {
+		b.WriteString(strings.Join(systems, "\n"))
+		b.WriteString("\n\n")
+	}
+	if len(convo) == 1 && convo[0].Role == "user" {
+		b.WriteString(messageText(convo[0].Content))
+	} else {
+		for _, m := range convo {
+			label := "User"
+			if m.Role == "assistant" {
+				label = "Assistant"
+			}
+			b.WriteString(label)
+			b.WriteString(": ")
+			b.WriteString(messageText(m.Content))
+			b.WriteString("\n\n")
 		}
 	}
-	writeJSON(w, http.StatusOK, apiPromptResponse{
-		Result:    text,
-		SessionID: res.SessionID,
-		IsError:   res.IsError || runErr != nil,
-	})
+	return strings.TrimSpace(b.String())
+}
+
+// messageText mengambil teks dari content yang berupa string atau array bagian
+// ({"type":"text","text":...}).
+func messageText(raw json.RawMessage) string {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 {
+		return ""
+	}
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s
+	}
+	var parts []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(raw, &parts) == nil {
+		var b strings.Builder
+		for _, p := range parts {
+			b.WriteString(p.Text)
+		}
+		return b.String()
+	}
+	return ""
 }
 
 // apiAuthorized memvalidasi header Authorization: Bearer <token> secara
@@ -99,6 +231,12 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-func writeJSONError(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
+// writeOpenAIError membalas dalam format error OpenAI: {"error":{message,type}}.
+func writeOpenAIError(w http.ResponseWriter, code int, msg, typ string) {
+	writeJSON(w, code, map[string]any{
+		"error": map[string]any{
+			"message": msg,
+			"type":    typ,
+		},
+	})
 }
