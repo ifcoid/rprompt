@@ -20,12 +20,18 @@ type fakeRunner struct {
 	gotPrompt  string
 	gotWorkDir string
 	gotModel   string
+	events     []claude.StreamEvent // dipancarkan via onEvent (untuk uji streaming)
 }
 
-func (f *fakeRunner) RunStream(_ context.Context, prompt, _, workDir, model string, _ func(claude.StreamEvent)) (claude.Result, error) {
+func (f *fakeRunner) RunStream(_ context.Context, prompt, _, workDir, model string, onEvent func(claude.StreamEvent)) (claude.Result, error) {
 	f.gotPrompt = prompt
 	f.gotWorkDir = workDir
 	f.gotModel = model
+	if onEvent != nil {
+		for _, e := range f.events {
+			onEvent(e)
+		}
+	}
 	return f.result, f.err
 }
 
@@ -104,15 +110,50 @@ func TestChatEmptyMessages(t *testing.T) {
 	}
 }
 
-func TestChatStreamRejected(t *testing.T) {
-	s := newAPITestServer(&fakeRunner{})
-	body := `{"stream":true,"messages":[{"role":"user","content":"hai"}]}`
-	rr := doChat(s, http.MethodPost, "Bearer rahasia", body)
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("stream=true harus 400, dapat %d", rr.Code)
+func TestChatStreaming(t *testing.T) {
+	runner := &fakeRunner{
+		result: claude.Result{Text: "halo dunia"},
+		events: []claude.StreamEvent{{AppendText: "halo "}, {AppendText: "dunia"}},
 	}
-	if !strings.Contains(rr.Body.String(), "error") {
-		t.Errorf("balasan harus format error OpenAI: %s", rr.Body.String())
+	s := newAPITestServer(runner)
+	body := `{"model":"claude-code","stream":true,"messages":[{"role":"user","content":"x"}]}`
+	rr := doChat(s, http.MethodPost, "Bearer rahasia", body)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("harus 200, dapat %d", rr.Code)
+	}
+	if ct := rr.Header().Get("Content-Type"); !strings.Contains(ct, "text/event-stream") {
+		t.Fatalf("Content-Type harus SSE, dapat %q", ct)
+	}
+	out := rr.Body.String()
+	for _, want := range []string{
+		`"delta":{"role":"assistant"}`,
+		`"content":"halo "`,
+		`"content":"dunia"`,
+		`"finish_reason":"stop"`,
+		"data: [DONE]",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output SSE tidak memuat %q\n--- body ---\n%s", want, out)
+		}
+	}
+}
+
+func TestChatStreamingGemini(t *testing.T) {
+	gem := &fakeGemini{out: "jawaban gemini"}
+	s := newAPITestServer(&fakeRunner{})
+	s.gemini = gem
+	body := `{"model":"gemini-2.5-flash","stream":true,"messages":[{"role":"user","content":"x"}]}`
+	rr := doChat(s, http.MethodPost, "Bearer rahasia", body)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("harus 200, dapat %d", rr.Code)
+	}
+	out := rr.Body.String()
+	if !strings.Contains(out, `"content":"jawaban gemini"`) || !strings.Contains(out, "data: [DONE]") {
+		t.Errorf("output SSE Gemini tak sesuai:\n%s", out)
+	}
+	if gem.gotModel != "gemini-2.5-flash" {
+		t.Errorf("model harus diteruskan ke Gemini, dapat %q", gem.gotModel)
 	}
 }
 

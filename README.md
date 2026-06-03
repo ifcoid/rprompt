@@ -283,8 +283,11 @@ dan mematikan cloudflared saat rprompt berhenti:
   `gemini` → Gemini CLI; selain itu → Claude (default `claude-code`). Untuk
   Claude, nama model spesifik diabaikan (model ikut langganan CLI). `/v1/models`
   mengiklankan `claude-code` (dan `gemini-2.5-flash` bila Gemini aktif).
-- **Streaming belum didukung** — `stream=true` dibalas error `400`. Pakai
-  `stream=false` (default).
+- **Streaming (SSE)** — kirim `stream:true` untuk balasan bertahap format SSE
+  OpenAI (`chat.completion.chunk` … `data: [DONE]`). **Disarankan untuk output
+  panjang di balik Cloudflare**: koneksi disisipi keepalive sehingga tidak kena
+  timeout **524** (~100s). `stream:false` (default) membalas JSON utuh — bisa
+  kena 524 bila jawaban makan >100s.
 - **Token usage** dilaporkan `0` (tidak dilacak).
 - **Konkurensi:** API berjalan **paralel** (tidak diantrikan). Batasi dengan
   `API_MAX_CONCURRENT` (0 = tak terbatas); penuh -> `429`. **Telegram tetap

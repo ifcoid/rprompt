@@ -75,11 +75,6 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusBadRequest, "JSON tidak valid", "invalid_request_error")
 		return
 	}
-	if req.Stream {
-		writeOpenAIError(w, http.StatusBadRequest,
-			"streaming tidak didukung; gunakan stream=false", "invalid_request_error")
-		return
-	}
 	prompt := buildPrompt(req.Messages)
 	if prompt == "" {
 		writeOpenAIError(w, http.StatusBadRequest, "'messages' kosong atau tanpa teks", "invalid_request_error")
@@ -99,6 +94,13 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), s.cfg.Timeout)
 	defer cancel()
+
+	// stream=true: balas SSE bertahap (hindari timeout 524 Cloudflare untuk
+	// output panjang). stream=false: balas JSON utuh seperti biasa.
+	if req.Stream {
+		s.streamChat(ctx, w, &req, prompt)
+		return
+	}
 
 	// Pilih engine berdasarkan field "model": "gemini..." -> Gemini, selain itu
 	// -> Claude. Keduanya stateless & memakai direktori kerja default.
