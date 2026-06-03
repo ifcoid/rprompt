@@ -4,6 +4,44 @@ Remote Prompt dari telegram ke cloude code dan dari cloude code ke telegram
 
 Memudahkan pekerjaan jadi laptop bisa di tinggal dan kita bisa prompt dari telegram hp kita kapanpu dan dimanapun. Permudah hidup dan tidak harus di depan laptop terus-terusan untuk menunggu prompt selesai, bisa sambil jalan jalan dan wisata bersama keluarga.
 
+## Quick Start
+
+Portabel — cukup satu binary + cloudflared, tanpa install service. Cocok dibawa
+pindah komputer.
+
+**Prasyarat:** [Go](https://go.dev/dl/) 1.26+, [Claude Code CLI](https://code.claude.com)
+(sudah `claude login`), dan [cloudflared](https://github.com/cloudflare/cloudflared/releases).
+
+```sh
+# 1. Ambil kode & build (hasilnya satu file binary)
+git clone https://github.com/ifcoid/rprompt.git
+cd rprompt
+go build -o rprompt.exe ./cmd/rprompt        # Linux/Mac: go build -o rprompt ./cmd/rprompt
+
+# 2. Konfigurasi
+copy .env.example .env                        # Linux/Mac: cp .env.example .env
+#   Isi minimal di .env:
+#     TELEGRAM_BOT_TOKEN   -> token dari @BotFather
+#     ALLOWED_CHAT_IDS     -> chat id Anda (dari @userinfobot)
+#     WEBHOOK_SECRET       -> string acak panjang
+#   Lalu set:  AUTO_TUNNEL=true   (cloudflared + webhook otomatis, URL acak)
+
+# 3. Jalankan
+./rprompt.exe
+#   Tunggu log "webhook otomatis terdaftar: ...", lalu kirim pesan ke bot dari HP.
+#   Ctrl-C untuk berhenti (webhook & tunnel ikut dibersihkan).
+```
+
+Itu saja. Tidak perlu Windows service / Task Scheduler — jalankan `./rprompt.exe`
+saat ingin memakai bot, tutup saat selesai. Pindah komputer? `git clone` lagi,
+salin `.env`, `claude login`, jalankan.
+
+> **URL tetap (opsional):** quick tunnel memberi URL acak tiap jalan. Untuk
+> hostname permanen, pakai cloudflared *named tunnel* — lihat
+> [Menjalankan](#menjalankan).
+>
+> **Engine Gemini & API (opsional):** lihat [HTTP API](#http-api-openai-compatible).
+
 ## Cara kerja
 
 ```
