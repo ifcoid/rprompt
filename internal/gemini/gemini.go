@@ -30,12 +30,20 @@ func New(bin string, extraArgs []string, oauthOnly bool) *Runner {
 
 // command menyusun *exec.Cmd. Di Windows, binary .cmd/.bat (mis. shim npm
 // gemini.cmd) tidak bisa dieksekusi langsung oleh Go, jadi dibungkus `cmd /c`.
+// Nama pendek (mis. "gemini") di-resolve via PATH dulu agar ekstensinya
+// terdeteksi, sehingga full path tidak wajib.
 func (r *Runner) command(ctx context.Context, args []string) *exec.Cmd {
-	lower := strings.ToLower(r.Bin)
-	if runtime.GOOS == "windows" && (strings.HasSuffix(lower, ".cmd") || strings.HasSuffix(lower, ".bat")) {
-		return exec.CommandContext(ctx, "cmd", append([]string{"/c", r.Bin}, args...)...)
+	bin := r.Bin
+	if runtime.GOOS == "windows" && !strings.ContainsAny(bin, `\/`) {
+		if p, err := exec.LookPath(bin); err == nil {
+			bin = p
+		}
 	}
-	return exec.CommandContext(ctx, r.Bin, args...)
+	lower := strings.ToLower(bin)
+	if runtime.GOOS == "windows" && (strings.HasSuffix(lower, ".cmd") || strings.HasSuffix(lower, ".bat")) {
+		return exec.CommandContext(ctx, "cmd", append([]string{"/c", bin}, args...)...)
+	}
+	return exec.CommandContext(ctx, bin, args...)
 }
 
 // env mengembalikan environment untuk subprocess. Bila OAuthOnly, GEMINI_API_KEY
@@ -67,11 +75,15 @@ type cliJSON struct {
 
 // Run menjalankan satu prompt dan mengembalikan teks jawaban. Prompt dikirim
 // lewat stdin (gemini non-interaktif karena stdin/stdout di-pipe) agar aman dari
-// masalah panjang/escaping argumen. workDir menjadi direktori kerja gemini
-// (kosong = direktori kerja proses).
-func (r *Runner) Run(ctx context.Context, prompt, workDir string) (string, error) {
+// masalah panjang/escaping argumen. workDir = direktori kerja (kosong = default).
+// model = nama model yang diminta; bila spesifik (mis. "gemini-2.5-pro")
+// diteruskan ke `-m`, sehingga menimpa -m dari ExtraArgs.
+func (r *Runner) Run(ctx context.Context, prompt, workDir, model string) (string, error) {
 	args := []string{"--output-format", "json"}
 	args = append(args, r.ExtraArgs...)
+	if m := strings.TrimSpace(model); m != "" && !strings.EqualFold(m, "gemini") {
+		args = append(args, "-m", m)
+	}
 
 	cmd := r.command(ctx, args)
 	if workDir != "" {

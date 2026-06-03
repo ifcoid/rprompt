@@ -58,16 +58,22 @@ func TestParseStreamLineIgnoresJunk(t *testing.T) {
 func TestBuildArgs(t *testing.T) {
 	r := &Runner{Bin: "claude", ExtraArgs: []string{"--dangerously-skip-permissions"}}
 
-	got := r.buildArgs("")
+	got := r.buildArgs("", "")
 	want := []string{"-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"}
 	if !equal(got, want) {
 		t.Fatalf("tanpa sesi: dapat %#v", got)
 	}
 
-	got = r.buildArgs("sess-1")
+	got = r.buildArgs("sess-1", "")
 	want = []string{"-p", "--output-format", "stream-json", "--verbose", "--resume", "sess-1", "--dangerously-skip-permissions"}
 	if !equal(got, want) {
 		t.Fatalf("dengan sesi: dapat %#v", got)
+	}
+
+	got = r.buildArgs("", "opus")
+	want = []string{"-p", "--output-format", "stream-json", "--verbose", "--model", "opus", "--dangerously-skip-permissions"}
+	if !equal(got, want) {
+		t.Fatalf("dengan model: dapat %#v", got)
 	}
 }
 
@@ -76,7 +82,7 @@ func TestBuildArgsPermission(t *testing.T) {
 		Bin:            "claude",
 		PermissionArgs: []string{"--permission-prompt-tool", "mcp__rprompt__approval_prompt", "--mcp-config", "/tmp/x.json"},
 	}
-	got := r.buildArgs("")
+	got := r.buildArgs("", "")
 	want := []string{
 		"-p", "--output-format", "stream-json", "--verbose",
 		"--permission-prompt-tool", "mcp__rprompt__approval_prompt", "--mcp-config", "/tmp/x.json",

@@ -54,11 +54,15 @@ type streamMsg struct {
 	IsError bool   `json:"is_error"`
 }
 
-// buildArgs menyusun argumen CLI untuk satu eksekusi streaming.
-func (r *Runner) buildArgs(sessionID string) []string {
+// buildArgs menyusun argumen CLI untuk satu eksekusi streaming. model kosong =
+// pakai model default langganan.
+func (r *Runner) buildArgs(sessionID, model string) []string {
 	args := []string{"-p", "--output-format", "stream-json", "--verbose"}
 	if sessionID != "" {
 		args = append(args, "--resume", sessionID)
+	}
+	if model != "" {
+		args = append(args, "--model", model)
 	}
 	args = append(args, r.PermissionArgs...)
 	args = append(args, r.ExtraArgs...)
@@ -69,7 +73,7 @@ func (r *Runner) buildArgs(sessionID string) []string {
 // (teks bertahap, pemakaian tool, lalu hasil akhir). Bila sessionID tidak
 // kosong, percakapan sebelumnya dilanjutkan via --resume. Mengembalikan Result
 // final termasuk session id baru yang harus disimpan.
-func (r *Runner) RunStream(ctx context.Context, prompt, sessionID, workDir string, onEvent func(StreamEvent)) (Result, error) {
+func (r *Runner) RunStream(ctx context.Context, prompt, sessionID, workDir, model string, onEvent func(StreamEvent)) (Result, error) {
 	if onEvent == nil {
 		onEvent = func(StreamEvent) {}
 	}
@@ -77,7 +81,7 @@ func (r *Runner) RunStream(ctx context.Context, prompt, sessionID, workDir strin
 		workDir = r.WorkDir
 	}
 
-	cmd := exec.CommandContext(ctx, r.Bin, r.buildArgs(sessionID)...)
+	cmd := exec.CommandContext(ctx, r.Bin, r.buildArgs(sessionID, model)...)
 	cmd.Dir = workDir
 	cmd.Stdin = strings.NewReader(prompt)
 

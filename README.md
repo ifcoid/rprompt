@@ -249,10 +249,10 @@ client.chat.completions.create(model="gemini-2.5-flash",
   sebagai user yang login (agar bisa baca `~/.gemini`). Bila `GEMINI_API_KEY`
   terlanjur ter-set di environment tapi Anda ingin memakai **login CLI**, set
   `GEMINI_USE_OAUTH=true` — rprompt akan menghapus key itu dari subprocess gemini.
-- **Windows:** `GEMINI_BIN` umumnya shim npm `.cmd` (mis.
-  `…\AppData\Roaming\npm\gemini.cmd`; Go menjalankannya via `cmd /c`), dan folder
-  Node (mis. `C:\Program Files\nodejs`) **harus ada di PATH** karena `gemini.cmd`
-  memanggil `node`.
+- **Windows:** `GEMINI_BIN=gemini` (nama pendek) cukup bila ada di PATH — rprompt
+  meresolve-nya & membungkus shim `.cmd` via `cmd /c` otomatis (full path juga
+  boleh). Folder Node (mis. `C:\Program Files\nodejs`) **harus ada di PATH** karena
+  `gemini` memanggil `node`. Hal yang sama: `CLAUDE_BIN=claude` cukup bila di PATH.
 - Jalur Gemini juga **stateless** & berbagi batas konkurensi API yang sama.
 
 ## Pengembangan

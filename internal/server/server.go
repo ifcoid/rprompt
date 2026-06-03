@@ -25,12 +25,12 @@ import (
 // promptRunner adalah subset claude.Runner yang dipakai Server (diabstraksikan
 // agar handler bisa diuji tanpa menjalankan binary claude).
 type promptRunner interface {
-	RunStream(ctx context.Context, prompt, sessionID, workDir string, onEvent func(claude.StreamEvent)) (claude.Result, error)
+	RunStream(ctx context.Context, prompt, sessionID, workDir, model string, onEvent func(claude.StreamEvent)) (claude.Result, error)
 }
 
 // GeminiRunner menjalankan prompt lewat Gemini CLI (nil bila tidak diaktifkan).
 type GeminiRunner interface {
-	Run(ctx context.Context, prompt, workDir string) (string, error)
+	Run(ctx context.Context, prompt, workDir, model string) (string, error)
 }
 
 // Server menahan dependensi runtime handler.
@@ -393,7 +393,7 @@ func (s *Server) handlePrompt(chatID int64, prompt string) {
 	sessionID := s.store.Get(chatID)
 	workDir := s.chatWorkDir(chatID)
 
-	res, runErr := s.runner.RunStream(ctx, prompt, sessionID, workDir, func(ev claude.StreamEvent) {
+	res, runErr := s.runner.RunStream(ctx, prompt, sessionID, workDir, "", func(ev claude.StreamEvent) {
 		switch {
 		case ev.AppendText != "":
 			disp.WriteString(ev.AppendText)

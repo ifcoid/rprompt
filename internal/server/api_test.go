@@ -19,11 +19,13 @@ type fakeRunner struct {
 	err        error
 	gotPrompt  string
 	gotWorkDir string
+	gotModel   string
 }
 
-func (f *fakeRunner) RunStream(_ context.Context, prompt, _, workDir string, _ func(claude.StreamEvent)) (claude.Result, error) {
+func (f *fakeRunner) RunStream(_ context.Context, prompt, _, workDir, model string, _ func(claude.StreamEvent)) (claude.Result, error) {
 	f.gotPrompt = prompt
 	f.gotWorkDir = workDir
+	f.gotModel = model
 	return f.result, f.err
 }
 
@@ -33,7 +35,7 @@ type blockingRunner struct {
 	release chan struct{}
 }
 
-func (b *blockingRunner) RunStream(_ context.Context, _, _, _ string, _ func(claude.StreamEvent)) (claude.Result, error) {
+func (b *blockingRunner) RunStream(_ context.Context, _, _, _, _ string, _ func(claude.StreamEvent)) (claude.Result, error) {
 	b.started <- struct{}{}
 	<-b.release
 	return claude.Result{Text: "done"}, nil
@@ -44,10 +46,12 @@ type fakeGemini struct {
 	out       string
 	err       error
 	gotPrompt string
+	gotModel  string
 }
 
-func (g *fakeGemini) Run(_ context.Context, prompt, _ string) (string, error) {
+func (g *fakeGemini) Run(_ context.Context, prompt, _, model string) (string, error) {
 	g.gotPrompt = prompt
+	g.gotModel = model
 	return g.out, g.err
 }
 
@@ -163,8 +167,41 @@ func TestChatGeminiRouting(t *testing.T) {
 	if gem.gotPrompt != "hai" {
 		t.Errorf("Gemini menerima prompt %q", gem.gotPrompt)
 	}
+	if gem.gotModel != "gemini-2.5-flash" {
+		t.Errorf("model harus diteruskan ke Gemini, dapat %q", gem.gotModel)
+	}
 	if claudeR.gotPrompt != "" {
 		t.Errorf("Claude tidak boleh dipanggil untuk model gemini")
+	}
+}
+
+func TestChatClaudeModelOverride(t *testing.T) {
+	// model "opus" -> diteruskan ke claude --model; "gpt-4o" -> default ("").
+	cases := map[string]string{"opus": "opus", "claude-code": "", "gpt-4o": "", "claude-opus-4-8": "claude-opus-4-8"}
+	for model, wantArg := range cases {
+		runner := &fakeRunner{result: claude.Result{Text: "ok"}}
+		s := newAPITestServer(runner)
+		body := `{"model":"` + model + `","messages":[{"role":"user","content":"x"}]}`
+		rr := doChat(s, http.MethodPost, "Bearer rahasia", body)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("model %q: harus 200, dapat %d", model, rr.Code)
+		}
+		if runner.gotModel != wantArg {
+			t.Errorf("model %q -> --model %q, mau %q", model, runner.gotModel, wantArg)
+		}
+	}
+}
+
+func TestClaudeModelOverride(t *testing.T) {
+	cases := map[string]string{
+		"": "", "claude-code": "", "claude": "",
+		"opus": "opus", "sonnet": "sonnet", "haiku": "haiku",
+		"claude-opus-4-8": "claude-opus-4-8", "gpt-4o": "", "gemini-2.5-pro": "",
+	}
+	for in, want := range cases {
+		if got := claudeModelOverride(in); got != want {
+			t.Errorf("claudeModelOverride(%q)=%q, mau %q", in, got, want)
+		}
 	}
 }
 

@@ -109,7 +109,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 				"model Gemini tidak diaktifkan (set GEMINI_ENABLED=true)", "invalid_request_error")
 			return
 		}
-		out, err := s.gemini.Run(ctx, prompt, s.cfg.WorkDir)
+		out, err := s.gemini.Run(ctx, prompt, s.cfg.WorkDir, req.Model)
 		if err != nil {
 			log.Printf("openai api gemini error: %v", err)
 			writeOpenAIError(w, http.StatusBadGateway, "Gemini error: "+err.Error(), "api_error")
@@ -117,7 +117,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		}
 		text = out
 	} else {
-		res, runErr := s.apiRunner.RunStream(ctx, prompt, "", s.cfg.WorkDir, nil)
+		res, runErr := s.apiRunner.RunStream(ctx, prompt, "", s.cfg.WorkDir, claudeModelOverride(req.Model), nil)
 		if runErr != nil {
 			log.Printf("openai api claude error: %v", runErr)
 		}
@@ -152,19 +152,21 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusUnauthorized, "API key tidak valid", "invalid_request_error")
 		return
 	}
-	data := []map[string]any{{
-		"id":       apiModelName,
-		"object":   "model",
-		"created":  0,
-		"owned_by": "anthropic",
-	}}
+	add := func(data []map[string]any, owner string, ids ...string) []map[string]any {
+		for _, id := range ids {
+			data = append(data, map[string]any{
+				"id": id, "object": "model", "created": 0, "owned_by": owner,
+			})
+		}
+		return data
+	}
+	var data []map[string]any
+	// Claude: default + alias yang diteruskan ke `claude --model`.
+	data = add(data, "anthropic", apiModelName, "opus", "sonnet", "haiku")
 	if s.gemini != nil {
-		data = append(data, map[string]any{
-			"id":       "gemini-2.5-flash",
-			"object":   "model",
-			"created":  0,
-			"owned_by": "google",
-		})
+		// Gemini: nama yang diteruskan ke `gemini -m` (apa pun gemini-* valid).
+		data = add(data, "google",
+			"gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-3-pro-preview")
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
 }
@@ -174,6 +176,24 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 // isGeminiModel mengembalikan true bila nama model menunjuk ke engine Gemini.
 func isGeminiModel(model string) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "gemini")
+}
+
+// claudeModelOverride memetakan field "model" OpenAI ke argumen --model claude.
+// Mengembalikan "" (pakai default langganan) untuk nama generik/tak dikenal
+// (mis. "claude-code", "gpt-4o") agar klien yang mengirim model sembarang tidak
+// gagal. Hanya alias/id Claude yang diteruskan.
+func claudeModelOverride(model string) string {
+	m := strings.ToLower(strings.TrimSpace(model))
+	switch {
+	case m == "" || m == "claude-code", m == "claude":
+		return ""
+	case m == "opus" || m == "sonnet" || m == "haiku":
+		return m
+	case strings.HasPrefix(m, "claude-"):
+		return strings.TrimSpace(model)
+	default:
+		return ""
+	}
 }
 
 // buildPrompt meratakan messages OpenAI menjadi satu prompt untuk claude -p.
