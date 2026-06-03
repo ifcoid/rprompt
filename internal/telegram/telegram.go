@@ -200,6 +200,19 @@ func (c *Client) SendChatAction(ctx context.Context, chatID int64, action string
 	}, nil)
 }
 
+// GetUpdates menarik update via long polling. offset = update_id berikutnya yang
+// diharapkan; timeoutSeconds = lama Telegram menahan koneksi bila belum ada
+// update. Dipakai pada mode polling (alternatif webhook, tanpa URL publik).
+func (c *Client) GetUpdates(ctx context.Context, offset int64, timeoutSeconds int) ([]Update, error) {
+	var out []Update
+	err := c.callJSON(ctx, "getUpdates", map[string]any{
+		"offset":          offset,
+		"timeout":         timeoutSeconds,
+		"allowed_updates": []string{"message", "callback_query"},
+	}, &out)
+	return out, err
+}
+
 // SetWebhook mendaftarkan URL webhook beserta secret_token ke Telegram.
 func (c *Client) SetWebhook(ctx context.Context, webhookURL, secret string) error {
 	form := url.Values{}

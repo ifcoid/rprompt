@@ -126,12 +126,44 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 	// Balas 200 segera; pemrosesan berjalan asinkron agar Telegram tidak retry.
 	w.WriteHeader(http.StatusOK)
+	s.dispatch(&update)
+}
 
+// dispatch merutekan satu update ke handler yang sesuai (dipakai webhook & polling).
+func (s *Server) dispatch(u *telegram.Update) {
 	switch {
-	case update.CallbackQuery != nil:
-		go s.handleCallback(update.CallbackQuery)
-	case update.Message != nil:
-		go s.process(update.Message)
+	case u.CallbackQuery != nil:
+		go s.handleCallback(u.CallbackQuery)
+	case u.Message != nil:
+		go s.process(u.Message)
+	}
+}
+
+// Poll menjalankan long polling getUpdates sampai ctx dibatalkan. Dipakai pada
+// mode polling (tanpa webhook/URL publik). Webhook harus sudah dihapus dulu.
+func (s *Server) Poll(ctx context.Context) {
+	const pollTimeout = 30 // detik Telegram menahan koneksi
+	var offset int64
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		updates, err := s.tg.GetUpdates(ctx, offset, pollTimeout)
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			log.Printf("getUpdates gagal: %v (coba lagi)", err)
+			time.Sleep(3 * time.Second)
+			continue
+		}
+		for _, u := range updates {
+			if u.UpdateID >= offset {
+				offset = u.UpdateID + 1
+			}
+			up := u
+			s.dispatch(&up)
+		}
 	}
 }
 

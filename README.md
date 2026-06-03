@@ -6,11 +6,12 @@ Memudahkan pekerjaan jadi laptop bisa di tinggal dan kita bisa prompt dari teleg
 
 ## Quick Start
 
-Portabel — cukup satu binary + cloudflared, tanpa install service. Cocok dibawa
-pindah komputer.
+Portabel — **satu binary, tanpa cloudflared, tanpa service**. Mode `polling`
+membuat bot menarik update sendiri dari Telegram, jadi tidak perlu URL publik
+(jalan di balik NAT). Cocok dibawa pindah komputer.
 
 **Prasyarat:** [Go](https://go.dev/dl/) 1.26+, [Claude Code CLI](https://code.claude.com)
-(sudah `claude login`), dan [cloudflared](https://github.com/cloudflare/cloudflared/releases).
+(sudah `claude login`). *(cloudflared hanya perlu bila pakai mode webhook.)*
 
 ```sh
 # 1. Ambil kode & build (hasilnya satu file binary)
@@ -23,22 +24,21 @@ copy .env.example .env                        # Linux/Mac: cp .env.example .env
 #   Isi minimal di .env:
 #     TELEGRAM_BOT_TOKEN   -> token dari @BotFather
 #     ALLOWED_CHAT_IDS     -> chat id Anda (dari @userinfobot)
-#     WEBHOOK_SECRET       -> string acak panjang
-#   Lalu set:  AUTO_TUNNEL=true   (cloudflared + webhook otomatis, URL acak)
+#     TELEGRAM_MODE=polling   (default; tanpa webhook/cloudflared)
 
 # 3. Jalankan
 ./rprompt.exe
-#   Tunggu log "webhook otomatis terdaftar: ...", lalu kirim pesan ke bot dari HP.
-#   Ctrl-C untuk berhenti (webhook & tunnel ikut dibersihkan).
+#   Tunggu log "mode Telegram: long polling", lalu kirim pesan ke bot dari HP.
+#   Ctrl-C untuk berhenti.
 ```
 
-Itu saja. Tidak perlu Windows service / Task Scheduler — jalankan `./rprompt.exe`
-saat ingin memakai bot, tutup saat selesai. Pindah komputer? `git clone` lagi,
-salin `.env`, `claude login`, jalankan.
+Itu saja — tidak perlu cloudflared, URL publik, Windows service, atau Task
+Scheduler. Jalankan `./rprompt.exe` saat ingin memakai bot, tutup saat selesai.
+Pindah komputer? `git clone` lagi, salin `.env`, `claude login`, jalankan.
 
-> **URL tetap (opsional):** quick tunnel memberi URL acak tiap jalan. Untuk
-> hostname permanen, pakai cloudflared *named tunnel* — lihat
-> [Menjalankan](#menjalankan).
+> **Mode webhook (opsional):** bila ingin URL publik (mis. untuk memanggil HTTP
+> API dari internet), set `TELEGRAM_MODE=webhook` + `AUTO_TUNNEL=true` (quick
+> tunnel) atau named tunnel — lihat [Menjalankan](#menjalankan).
 >
 > **Engine Gemini & API (opsional):** lihat [HTTP API](#http-api-openai-compatible).
 

@@ -15,6 +15,7 @@ import (
 // Config menyimpan seluruh konfigurasi runtime.
 type Config struct {
 	BotToken      string         // token bot dari @BotFather
+	TelegramMode  string         // "webhook" | "polling"
 	AllowedChats  map[int64]bool // daftar chat id yang diizinkan
 	ListenAddr    string         // alamat listen HTTP, mis. ":8080"
 	WebhookPath   string         // path endpoint webhook, mis. "/telegram/webhook"
@@ -163,6 +164,11 @@ func Load() (*Config, error) {
 			return nil, fmt.Errorf("ALLOWED_CHAT_IDS berisi nilai bukan angka: %q", part)
 		}
 		c.AllowedChats[id] = true
+	}
+
+	c.TelegramMode = strings.ToLower(getenv("TELEGRAM_MODE", "webhook"))
+	if c.TelegramMode != "webhook" && c.TelegramMode != "polling" {
+		return nil, fmt.Errorf("TELEGRAM_MODE harus \"webhook\" atau \"polling\", dapat %q", c.TelegramMode)
 	}
 
 	if c.BotToken == "" {

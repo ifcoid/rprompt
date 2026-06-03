@@ -135,9 +135,22 @@ func main() {
 		}
 	}()
 
-	// Auto-tunnel: jalankan cloudflared & daftarkan webhook otomatis.
+	// Mode Telegram: polling (tanpa tunnel/URL publik) atau webhook
+	// (+auto-tunnel / URL tetap).
 	var tun *tunnel.Tunnel
-	if cfg.AutoTunnel {
+	pollCtx, pollCancel := context.WithCancel(context.Background())
+	defer pollCancel()
+
+	if cfg.TelegramMode == "polling" {
+		// Hapus webhook agar getUpdates bisa jalan, lalu mulai long polling.
+		dctx, dcancel := context.WithTimeout(context.Background(), 15*time.Second)
+		if err := tg.DeleteWebhook(dctx); err != nil {
+			log.Printf("hapus webhook (untuk polling): %v", err)
+		}
+		dcancel()
+		go srv.Poll(pollCtx)
+		log.Println("mode Telegram: long polling (tanpa webhook/cloudflared)")
+	} else if cfg.AutoTunnel {
 		t, err := tunnel.Start(context.Background(), cfg.CloudflaredBin, cfg.LocalPort(), 60*time.Second)
 		if err != nil {
 			log.Fatalf("auto-tunnel: %v", err)
@@ -177,6 +190,7 @@ func main() {
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
 	log.Println("mematikan server...")
+	pollCancel() // hentikan long polling (bila aktif)
 
 	// Bersihkan tunnel & webhook bila auto-tunnel dipakai.
 	if tun != nil {
