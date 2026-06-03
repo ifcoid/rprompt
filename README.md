@@ -241,6 +241,31 @@ resp = client.chat.completions.create(
 print(resp.choices[0].message.content)
 ```
 
+### Mengakses API dari luar (ekspos manual)
+
+Pada mode **polling** (default portabel), API hanya didengar di `localhost:8080`
+— bot Telegram tetap jalan tanpa tunnel, tapi API tidak otomatis terekspos.
+Untuk memanggil API dari internet, jalankan **cloudflared secara manual** di
+terminal terpisah (rprompt tetap berjalan apa adanya):
+
+```sh
+# Opsi A — quick tunnel (URL acak tiap jalan)
+cloudflared tunnel --url http://localhost:8080
+#   -> API di https://xxx.trycloudflare.com/v1/chat/completions
+
+# Opsi B — named tunnel (URL tetap; lihat "Menjalankan" untuk setup)
+cloudflared tunnel run <nama-tunnel>
+#   -> API di https://nama.domain-anda.com/v1/chat/completions
+```
+
+`AUTO_TUNNEL` sengaja TIDAK dipakai untuk ini karena ia terikat ke alur webhook
+(menyalakan cloudflared **dan** mendaftarkan webhook Telegram); di mode polling
+alur webhook dilewati. Jadi untuk API, cloudflared dijalankan terpisah.
+
+> Endpoint `/v1/*` jadi publik tetapi dilindungi `API_TOKEN` (Bearer) — jaga
+> token tetap rahasia & panjang. Hanya `/healthz` & `/v1/*` yang relevan; jalur
+> webhook tidak dipakai di mode polling.
+
 ### Catatan penting
 
 - **Stateless** (sesuai OpenAI): kirim seluruh `messages` tiap request. rprompt
