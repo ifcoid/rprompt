@@ -262,6 +262,14 @@ cloudflared tunnel run <nama-tunnel>
 (menyalakan cloudflared **dan** mendaftarkan webhook Telegram); di mode polling
 alur webhook dilewati. Jadi untuk API, cloudflared dijalankan terpisah.
 
+**Praktis (Windows):** `start.ps1` menjalankan rprompt + named tunnel sekaligus,
+dan mematikan cloudflared saat rprompt berhenti:
+
+```powershell
+.\start.ps1                 # named tunnel "rprompt"
+.\start.ps1 -Tunnel namaku  # nama tunnel lain
+```
+
 > Endpoint `/v1/*` jadi publik tetapi dilindungi `API_TOKEN` (Bearer) — jaga
 > token tetap rahasia & panjang. Hanya `/healthz` & `/v1/*` yang relevan; jalur
 > webhook tidak dipakai di mode polling.
