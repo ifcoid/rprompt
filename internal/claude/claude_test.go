@@ -75,6 +75,12 @@ func TestBuildArgs(t *testing.T) {
 	if !equal(got, want) {
 		t.Fatalf("dengan model: dapat %#v", got)
 	}
+
+	got = r.buildArgs(ResumeLatest, "")
+	want = []string{"-p", "--output-format", "stream-json", "--verbose", "--continue", "--dangerously-skip-permissions"}
+	if !equal(got, want) {
+		t.Fatalf("ResumeLatest harus --continue: dapat %#v", got)
+	}
 }
 
 func TestBuildArgsPermission(t *testing.T) {

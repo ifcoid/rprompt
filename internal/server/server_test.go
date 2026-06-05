@@ -29,6 +29,20 @@ func TestChatWorkDir(t *testing.T) {
 	}
 }
 
+func TestContinueFlag(t *testing.T) {
+	s := &Server{cwd: map[int64]string{}, cont: map[int64]bool{}}
+	if s.takeContinue(7) {
+		t.Fatal("awalnya harus false")
+	}
+	s.setContinue(7)
+	if !s.takeContinue(7) {
+		t.Fatal("setelah setContinue harus true")
+	}
+	if s.takeContinue(7) {
+		t.Fatal("takeContinue harus sekali pakai (lalu false)")
+	}
+}
+
 func TestIsGeminiModel(t *testing.T) {
 	cases := map[string]bool{
 		"gemini-2.5-flash": true,

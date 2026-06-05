@@ -41,6 +41,7 @@ Pindah komputer? `git clone` → salin `.env` → `claude login` → jalankan.
 | Perintah | Fungsi |
 |---|---|
 | `/new` | sesi baru (lupakan konteks) |
+| `/continue` | lanjutkan sesi Claude terakhir di folder aktif (mis. dari PC) |
 | `/status` `/pwd` | lihat folder kerja & status sesi |
 | `/cd <path>` | pindah folder kerja (path bebas) |
 | `/project [nama]` | pindah ke proyek whitelist (`PROJECTS` di `.env`); tanpa nama = daftar |

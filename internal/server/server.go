@@ -46,8 +46,9 @@ type Server struct {
 	tgSem  chan struct{} // serialisasi Telegram: ukuran 1
 	apiSem chan struct{} // batas paralel API; nil = tak terbatas
 
-	cwdMu sync.Mutex       // melindungi cwd
-	cwd   map[int64]string // direktori kerja per-chat (override cfg.WorkDir)
+	cwdMu sync.Mutex        // melindungi cwd & cont
+	cwd   map[int64]string  // direktori kerja per-chat (override cfg.WorkDir)
+	cont  map[int64]bool    // /continue: prompt berikutnya pakai --continue
 }
 
 // New membangun Server. reg boleh nil bila izin interaktif tidak dipakai.
@@ -69,7 +70,27 @@ func New(cfg *config.Config, tg *telegram.Client, runner, apiRunner promptRunner
 		tgSem:     make(chan struct{}, 1),
 		apiSem:    apiSem,
 		cwd:       map[int64]string{},
+		cont:      map[int64]bool{},
 	}
+}
+
+// setContinue menandai bahwa prompt berikutnya pada chat memakai --continue.
+func (s *Server) setContinue(chatID int64) {
+	s.cwdMu.Lock()
+	s.cont[chatID] = true
+	s.cwdMu.Unlock()
+}
+
+// takeContinue mengembalikan true (sekali) bila /continue sedang aktif, lalu
+// menghapusnya.
+func (s *Server) takeContinue(chatID int64) bool {
+	s.cwdMu.Lock()
+	defer s.cwdMu.Unlock()
+	if s.cont[chatID] {
+		delete(s.cont, chatID)
+		return true
+	}
+	return false
 }
 
 // chatWorkDir mengembalikan direktori kerja untuk chat (override per-chat bila
@@ -252,7 +273,18 @@ func (s *Server) handleCommand(chatID int64, text string) {
 		if err := s.store.Reset(chatID); err != nil {
 			log.Printf("gagal reset sesi chat_id=%d: %v", chatID, err)
 		}
+		s.takeContinue(chatID) // batalkan /continue yang menggantung
 		_ = s.tg.SendMessage(ctx, chatID, "Sesi baru dimulai. Konteks percakapan sebelumnya dilupakan.")
+	case "/continue", "/c":
+		// Lanjutkan sesi Claude TERAKHIR di folder aktif (mis. sesi yang dibuat
+		// di PC), via `claude --continue`.
+		s.setContinue(chatID)
+		if len(fields) > 1 {
+			s.handlePrompt(chatID, strings.Join(fields[1:], " "))
+			return
+		}
+		_ = s.tg.SendMessage(ctx, chatID,
+			"Akan melanjutkan sesi Claude terakhir di:\n"+s.chatWorkDir(chatID)+"\nKirim prompt Anda sekarang.")
 	case "/status":
 		state := "tidak ada (akan memulai sesi baru)"
 		if s.store.Get(chatID) != "" {
@@ -423,6 +455,9 @@ func (s *Server) handlePrompt(chatID int64, prompt string) {
 
 	var disp strings.Builder
 	sessionID := s.store.Get(chatID)
+	if s.takeContinue(chatID) {
+		sessionID = claude.ResumeLatest // /continue -> lanjutkan sesi terakhir di folder
+	}
 	workDir := s.chatWorkDir(chatID)
 
 	res, runErr := s.runner.RunStream(ctx, prompt, sessionID, workDir, "", func(ev claude.StreamEvent) {
@@ -482,6 +517,7 @@ Kirim teks apa pun sebagai prompt, dan saya akan menjalankannya di Claude Code l
 
 Perintah:
 /new            - mulai sesi baru (lupakan konteks)
+/continue       - lanjutkan sesi Claude terakhir di folder aktif (mis. dari PC)
 /status         - lihat direktori kerja & status sesi
 /pwd            - lihat direktori kerja saat ini
 /cd <path>      - pindah direktori kerja (path bebas)

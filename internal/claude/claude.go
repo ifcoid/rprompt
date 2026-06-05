@@ -54,11 +54,19 @@ type streamMsg struct {
 	IsError bool   `json:"is_error"`
 }
 
+// ResumeLatest dipakai sebagai nilai sessionID untuk melanjutkan sesi TERAKHIR
+// di direktori kerja (claude --continue) alih-alih --resume <id> tertentu.
+// Berguna untuk menyambung sesi Claude Code interaktif yang dibuat di PC.
+const ResumeLatest = "\x00continue"
+
 // buildArgs menyusun argumen CLI untuk satu eksekusi streaming. model kosong =
 // pakai model default langganan.
 func (r *Runner) buildArgs(sessionID, model string) []string {
 	args := []string{"-p", "--output-format", "stream-json", "--verbose"}
-	if sessionID != "" {
+	switch {
+	case sessionID == ResumeLatest:
+		args = append(args, "--continue")
+	case sessionID != "":
 		args = append(args, "--resume", sessionID)
 	}
 	if model != "" {
