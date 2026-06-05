@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 )
 
 // Runner mengeksekusi binary gemini dengan konfigurasi tetap.
@@ -73,12 +74,48 @@ type cliJSON struct {
 	} `json:"error"`
 }
 
-// Run menjalankan satu prompt dan mengembalikan teks jawaban. Prompt dikirim
-// lewat stdin (gemini non-interaktif karena stdin/stdout di-pipe) agar aman dari
-// masalah panjang/escaping argumen. workDir = direktori kerja (kosong = default).
-// model = nama model yang diminta; bila spesifik (mis. "gemini-2.5-pro")
-// diteruskan ke `-m`, sehingga menimpa -m dari ExtraArgs.
+// Run menjalankan prompt dan mengembalikan teks jawaban, dengan retry untuk
+// glitch sesaat Gemini (mis. "Invalid stream / empty response / malformed tool
+// call" atau model overloaded) yang biasanya pulih saat diulang.
 func (r *Runner) Run(ctx context.Context, prompt, workDir, model string) (string, error) {
+	const attempts = 3
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		out, err := r.runOnce(ctx, prompt, workDir, model)
+		if err == nil {
+			return out, nil
+		}
+		lastErr = err
+		if ctx.Err() != nil || !isTransient(err) {
+			return "", err
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(time.Duration(i+1) * 600 * time.Millisecond):
+		}
+	}
+	return "", lastErr
+}
+
+// isTransient menandai error Gemini yang layak di-retry.
+func isTransient(err error) bool {
+	s := strings.ToLower(err.Error())
+	for _, sub := range []string{
+		"invalid stream", "empty response", "malformed",
+		"overloaded", "try again", "unavailable", "500", "503", "deadline",
+	} {
+		if strings.Contains(s, sub) {
+			return true
+		}
+	}
+	return false
+}
+
+// runOnce menjalankan satu eksekusi gemini. Prompt dikirim lewat stdin (gemini
+// non-interaktif karena stdin/stdout di-pipe) agar aman dari masalah
+// panjang/escaping. workDir = direktori kerja; model spesifik diteruskan ke -m.
+func (r *Runner) runOnce(ctx context.Context, prompt, workDir, model string) (string, error) {
 	args := []string{"--output-format", "json"}
 	args = append(args, r.ExtraArgs...)
 	if m := strings.TrimSpace(model); m != "" && !strings.EqualFold(m, "gemini") {
