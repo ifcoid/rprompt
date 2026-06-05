@@ -10,6 +10,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -93,10 +94,10 @@ func main() {
 
 		mcpMux := http.NewServeMux()
 		mcpMux.Handle(cfg.MCPPath, mcpserver.Handler(reg, cfg.ResultFormat))
-		mcpSrv := &http.Server{Addr: cfg.MCPAddr, Handler: mcpMux, ReadHeaderTimeout: 10 * time.Second}
+		mcpSrv := &http.Server{Handler: mcpMux, ReadHeaderTimeout: 10 * time.Second}
+		mcpLn := mustListen(cfg.MCPAddr, "server izin (MCP)")
 		go func() {
-			log.Printf("server MCP izin listen di %s (tool %s)", cfg.MCPURL(), toolName)
-			if err := mcpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			if err := mcpSrv.Serve(mcpLn); err != nil && err != http.ErrServerClosed {
 				log.Fatalf("server MCP: %v", err)
 			}
 		}()
@@ -122,15 +123,10 @@ func main() {
 
 	srv := server.New(cfg, tg, runner, &apiRunner, gem, st, reg)
 
-	httpSrv := &http.Server{
-		Addr:              cfg.ListenAddr,
-		Handler:           srv.Handler(),
-		ReadHeaderTimeout: 10 * time.Second,
-	}
-
+	httpSrv := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	httpLn := mustListen(cfg.ListenAddr, "server HTTP")
 	go func() {
-		log.Printf("rprompt listen di %s (path %s), work_dir=%s", cfg.ListenAddr, cfg.WebhookPath, cfg.WorkDir)
-		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := httpSrv.Serve(httpLn); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server: %v", err)
 		}
 	}()
@@ -197,6 +193,8 @@ func main() {
 		log.Printf("webhook terdaftar: %s%s", cfg.WebhookURL, cfg.WebhookPath)
 	}
 
+	printReady(cfg)
+
 	// Tunggu sinyal untuk shutdown rapi.
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
@@ -261,6 +259,58 @@ func waitDNSPublished(host string, timeout time.Duration) bool {
 		time.Sleep(3 * time.Second)
 	}
 	return false
+}
+
+// mustListen membuka TCP listener; bila port sudah dipakai, beri pesan yang
+// jelas & langkah perbaikannya, lalu keluar (bukan error mentah dari OS).
+func mustListen(addr, label string) net.Listener {
+	ln, err := net.Listen("tcp", addr)
+	if err == nil {
+		return ln
+	}
+	if isAddrInUse(err) {
+		fmt.Fprintf(os.Stderr,
+			"\n[X] Port %s (%s) sudah dipakai.\n"+
+				"    Kemungkinan rprompt lain masih berjalan. Hentikan dulu lalu jalankan lagi:\n"+
+				"      Windows   : Get-Process rprompt | Stop-Process -Force\n"+
+				"      Linux/Mac : pkill rprompt\n"+
+				"    Atau ubah port di .env (LISTEN_ADDR / MCP_ADDR).\n\n", addr, label)
+		os.Exit(1)
+	}
+	fmt.Fprintf(os.Stderr, "\n[X] Gagal membuka %s di %s: %v\n\n", label, addr, err)
+	os.Exit(1)
+	return nil
+}
+
+func isAddrInUse(err error) bool {
+	if errors.Is(err, syscall.EADDRINUSE) {
+		return true
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "address already in use") ||
+		strings.Contains(s, "only one usage of each socket")
+}
+
+// printReady mencetak ringkasan singkat bahwa service siap + cara berhenti.
+func printReady(cfg *config.Config) {
+	tg := "polling (bot menarik update sendiri)"
+	if cfg.TelegramMode == "webhook" {
+		tg = "webhook"
+		if cfg.WebhookURL != "" {
+			tg = "webhook -> " + cfg.WebhookURL
+		}
+	}
+	api := "nonaktif (set API_ENABLED=true bila perlu)"
+	if cfg.APIEnabled {
+		api = "aktif di " + cfg.ListenAddr + " (POST /v1/chat/completions)"
+	}
+	fmt.Printf("\n==> rprompt SIAP. Tekan Ctrl-C untuk berhenti.\n")
+	fmt.Printf("    Telegram : %s\n", tg)
+	fmt.Printf("    HTTP API : %s\n", api)
+	if cfg.GeminiEnabled {
+		fmt.Printf("    Engine   : Claude + Gemini (pilih via field \"model\")\n")
+	}
+	fmt.Println()
 }
 
 // registerWebhook mendaftarkan webhook dengan sedikit retry. Dipanggil setelah
