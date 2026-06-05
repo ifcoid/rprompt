@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -97,34 +98,41 @@ func (s *Server) streamChat(ctx context.Context, w http.ResponseWriter, req *cha
 		}
 	}()
 
-	var runErr error
+	var errDetail string // pesan error asli engine (mis. rate limit) bila ada
 	if isGeminiModel(req.Model) {
 		if s.gemini == nil {
 			send(chatChunkDelta{Content: "[error] model Gemini tidak diaktifkan (GEMINI_ENABLED=true)"}, nil)
 		} else {
 			out, err := s.gemini.Run(ctx, prompt, s.cfg.WorkDir, req.Model)
-			runErr = err
-			if out != "" {
+			if err != nil {
+				errDetail = err.Error()
+			} else if out != "" {
 				send(chatChunkDelta{Content: out}, nil)
 			}
 		}
 	} else {
-		_, err := s.apiRunner.RunStream(ctx, prompt, "", s.cfg.WorkDir, claudeModelOverride(req.Model),
+		res, err := s.apiRunner.RunStream(ctx, prompt, "", s.cfg.WorkDir, claudeModelOverride(req.Model),
 			func(ev claude.StreamEvent) {
 				if ev.AppendText != "" {
 					send(chatChunkDelta{Content: ev.AppendText}, nil)
 				}
 			})
-		runErr = err
+		// Surface pesan asli claude (res.Text memuat stderr/pesan rate limit).
+		if err != nil || res.IsError {
+			errDetail = strings.TrimSpace(res.Text)
+			if errDetail == "" && err != nil {
+				errDetail = err.Error()
+			}
+		}
 	}
 
 	// Hentikan keepalive sebelum chunk penutup (hindari ping setelah [DONE]).
 	close(stop)
 	<-pingDone
 
-	if runErr != nil {
-		log.Printf("stream api error: %v", runErr)
-		send(chatChunkDelta{Content: "\n[error] " + runErr.Error()}, nil)
+	if errDetail != "" {
+		log.Printf("stream api error: %s", errDetail)
+		send(chatChunkDelta{Content: "\n[error] " + errDetail}, nil)
 	}
 	finish := "stop"
 	send(chatChunkDelta{}, &finish)

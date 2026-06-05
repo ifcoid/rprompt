@@ -120,11 +120,17 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		text = out
 	} else {
 		res, runErr := s.apiRunner.RunStream(ctx, prompt, "", s.cfg.WorkDir, claudeModelOverride(req.Model), nil)
-		if runErr != nil {
-			log.Printf("openai api claude error: %v", runErr)
-		}
-		if strings.TrimSpace(res.Text) == "" && (res.IsError || runErr != nil) {
-			writeOpenAIError(w, http.StatusBadGateway, "Claude melaporkan error", "api_error")
+		// res.Text memuat pesan asli claude (mis. rate limit) saat gagal.
+		if runErr != nil || res.IsError {
+			msg := strings.TrimSpace(res.Text)
+			if msg == "" && runErr != nil {
+				msg = runErr.Error()
+			}
+			if msg == "" {
+				msg = "Claude melaporkan error"
+			}
+			log.Printf("openai api claude error: %s", msg)
+			writeOpenAIError(w, http.StatusBadGateway, msg, "api_error")
 			return
 		}
 		text = res.Text
