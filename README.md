@@ -245,8 +245,20 @@ print(resp.choices[0].message.content)
 
 Pada mode **polling** (default portabel), API hanya didengar di `localhost:8080`
 — bot Telegram tetap jalan tanpa tunnel, tapi API tidak otomatis terekspos.
-Untuk memanggil API dari internet, jalankan **cloudflared secara manual** di
-terminal terpisah (rprompt tetap berjalan apa adanya):
+
+**Cara termudah — satu proses (`CLOUDFLARED_TUNNEL`):** isi nama named tunnel
+Anda di `.env`, maka rprompt menjalankan cloudflared sendiri (dan mematikannya
+saat berhenti). Cukup `rprompt.exe`:
+
+```sh
+# .env:
+#   CLOUDFLARED_TUNNEL=rprompt     # nama tunnel cloudflared Anda (URL tetap)
+#   AUTO_TUNNEL=false              # tidak boleh bareng AUTO_TUNNEL
+./rprompt.exe                      # -> rprompt + cloudflared sekaligus
+#   API di https://nama.domain-anda.com/v1/chat/completions
+```
+
+**Atau jalankan cloudflared manual** di terminal terpisah (rprompt apa adanya):
 
 ```sh
 # Opsi A — quick tunnel (URL acak tiap jalan)

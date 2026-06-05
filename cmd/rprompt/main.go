@@ -135,6 +135,18 @@ func main() {
 		}
 	}()
 
+	// Named tunnel (CLOUDFLARED_TUNNEL): rprompt menjalankan cloudflared sendiri
+	// (URL tetap) — satu proses untuk rprompt + tunnel, di mode apa pun.
+	var namedTun *tunnel.Tunnel
+	if cfg.CloudflaredTunnel != "" {
+		nt, err := tunnel.Run(cfg.CloudflaredBin, cfg.CloudflaredTunnel)
+		if err != nil {
+			log.Fatalf("named tunnel: %v", err)
+		}
+		namedTun = nt
+		log.Printf("cloudflared named tunnel %q dijalankan (URL tetap)", cfg.CloudflaredTunnel)
+	}
+
 	// Mode Telegram: polling (tanpa tunnel/URL publik) atau webhook
 	// (+auto-tunnel / URL tetap).
 	var tun *tunnel.Tunnel
@@ -191,6 +203,13 @@ func main() {
 	<-stop
 	log.Println("mematikan server...")
 	pollCancel() // hentikan long polling (bila aktif)
+
+	if namedTun != nil {
+		if err := namedTun.Stop(); err != nil {
+			log.Printf("stop named tunnel: %v", err)
+		}
+		log.Println("named tunnel dihentikan")
+	}
 
 	// Bersihkan tunnel & webhook bila auto-tunnel dipakai.
 	if tun != nil {

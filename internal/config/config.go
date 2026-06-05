@@ -45,6 +45,10 @@ type Config struct {
 	AutoTunnel     bool   // jalankan cloudflared sendiri lalu set-webhook otomatis
 	CloudflaredBin string // path binary cloudflared
 
+	// Named tunnel: bila diisi, rprompt menjalankan `cloudflared tunnel run <nama>`
+	// sebagai subprocess (URL tetap) — satu proses untuk rprompt + tunnel.
+	CloudflaredTunnel string
+
 	// Daftarkan webhook ke WEBHOOK_URL saat start (untuk URL tetap, mis. di Docker).
 	SetWebhookOnStart bool
 
@@ -137,6 +141,10 @@ func Load() (*Config, error) {
 
 	c.AutoTunnel = isTrue(os.Getenv("AUTO_TUNNEL"))
 	c.CloudflaredBin = getenv("CLOUDFLARED_BIN", "cloudflared")
+	c.CloudflaredTunnel = strings.TrimSpace(os.Getenv("CLOUDFLARED_TUNNEL"))
+	if c.AutoTunnel && c.CloudflaredTunnel != "" {
+		return nil, fmt.Errorf("pilih salah satu: AUTO_TUNNEL (quick tunnel) atau CLOUDFLARED_TUNNEL (named tunnel)")
+	}
 	c.SetWebhookOnStart = isTrue(os.Getenv("SET_WEBHOOK_ON_START"))
 	if c.SetWebhookOnStart && !c.AutoTunnel && c.WebhookURL == "" {
 		return nil, fmt.Errorf("WEBHOOK_URL wajib diisi bila SET_WEBHOOK_ON_START=true")

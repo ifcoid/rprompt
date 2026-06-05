@@ -60,6 +60,19 @@ func Start(ctx context.Context, bin, localPort string, timeout time.Duration) (*
 	}
 }
 
+// Run menjalankan `cloudflared tunnel run <name>` (named tunnel) sebagai
+// subprocess. URL-nya tetap (ditentukan config.yml/DNS), jadi tidak ada URL yang
+// perlu di-parse. Output cloudflared dibuang agar log rprompt tetap bersih.
+func Run(bin, name string) (*Tunnel, error) {
+	cmd := exec.Command(bin, "tunnel", "run", name)
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("menjalankan %q tunnel run %q: %w", bin, name, err)
+	}
+	return &Tunnel{cmd: cmd}, nil
+}
+
 // Stop menghentikan proses cloudflared.
 func (t *Tunnel) Stop() error {
 	if t == nil || t.cmd == nil || t.cmd.Process == nil {
