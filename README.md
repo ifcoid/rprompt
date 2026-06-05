@@ -38,6 +38,8 @@ Pindah komputer? `git clone` → salin `.env` → `claude login` → jalankan.
 
 ## Perintah bot
 
+Panduan pemakaian lengkap dari HP ada di [TELEGRAM.md](TELEGRAM.md).
+
 | Perintah | Fungsi |
 |---|---|
 | `/new` | sesi baru (lupakan konteks) |
