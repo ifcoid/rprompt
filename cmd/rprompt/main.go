@@ -28,6 +28,7 @@ import (
 	"github.com/awangga/rprompt/internal/claude"
 	"github.com/awangga/rprompt/internal/config"
 	"github.com/awangga/rprompt/internal/gemini"
+	"github.com/awangga/rprompt/internal/kiro"
 	"github.com/awangga/rprompt/internal/mcpserver"
 	"github.com/awangga/rprompt/internal/server"
 	"github.com/awangga/rprompt/internal/store"
@@ -111,7 +112,7 @@ func main() {
 	apiRunner.PermissionArgs = nil
 
 	// Engine Gemini opsional untuk API (routing via field "model").
-	var gem server.GeminiRunner
+	var gem server.APIRunner
 	if cfg.GeminiEnabled {
 		gem = gemini.New(cfg.GeminiBin, cfg.GeminiExtraArgs, cfg.GeminiUseOAuth)
 		auth := "API key dari environment"
@@ -121,7 +122,14 @@ func main() {
 		log.Printf("engine Gemini AKTIF (bin %q, auth: %s)", cfg.GeminiBin, auth)
 	}
 
-	srv := server.New(cfg, tg, runner, &apiRunner, gem, st, reg)
+	// Engine Kiro CLI opsional untuk API (routing via field "model").
+	var kir server.APIRunner
+	if cfg.KiroEnabled {
+		kir = kiro.New(cfg.KiroBin, cfg.KiroExtraArgs)
+		log.Printf("engine Kiro AKTIF (bin %q)", cfg.KiroBin)
+	}
+
+	srv := server.New(cfg, tg, runner, &apiRunner, gem, kir, st, reg)
 
 	httpSrv := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	httpLn := mustListen(cfg.ListenAddr, "server HTTP")
@@ -307,8 +315,8 @@ func printReady(cfg *config.Config) {
 	fmt.Printf("\n==> rprompt SIAP. Tekan Ctrl-C untuk berhenti.\n")
 	fmt.Printf("    Telegram : %s\n", tg)
 	fmt.Printf("    HTTP API : %s\n", api)
-	if cfg.GeminiEnabled {
-		fmt.Printf("    Engine   : Claude + Gemini (pilih via field \"model\")\n")
+	if cfg.GeminiEnabled || cfg.KiroEnabled {
+		fmt.Printf("    Engine   : Claude + Gemini/Kiro (pilih via field \"model\")\n")
 	}
 	fmt.Println()
 }

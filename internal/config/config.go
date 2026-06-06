@@ -34,6 +34,11 @@ type Config struct {
 	GeminiExtraArgs []string // argumen tambahan untuk gemini
 	GeminiUseOAuth  bool     // paksa login CLI (strip GEMINI_API_KEY/GOOGLE_API_KEY)
 
+	// Kiro CLI (opsional) untuk routing via field "model" di API.
+	KiroEnabled   bool     // aktifkan engine Kiro
+	KiroBin       string   // path binary kiro-cli
+	KiroExtraArgs []string // argumen tambahan untuk kiro-cli
+
 	// Izin interaktif via tombol Telegram.
 	Interactive     bool          // aktifkan persetujuan izin tool via Telegram
 	MCPAddr         string        // alamat listen lokal server MCP, mis. "127.0.0.1:8765"
@@ -116,6 +121,12 @@ func Load() (*Config, error) {
 	c.GeminiUseOAuth = isTrue(os.Getenv("GEMINI_USE_OAUTH"))
 	if g := strings.TrimSpace(os.Getenv("GEMINI_EXTRA_ARGS")); g != "" {
 		c.GeminiExtraArgs = strings.Fields(g)
+	}
+
+	c.KiroEnabled = isTrue(os.Getenv("KIRO_ENABLED"))
+	c.KiroBin = getenv("KIRO_BIN", "kiro-cli")
+	if k := strings.TrimSpace(os.Getenv("KIRO_EXTRA_ARGS")); k != "" {
+		c.KiroExtraArgs = strings.Fields(k)
 	}
 
 	secs := getenv("CLAUDE_TIMEOUT_SECONDS", "600")

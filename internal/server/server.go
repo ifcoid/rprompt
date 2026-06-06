@@ -28,8 +28,8 @@ type promptRunner interface {
 	RunStream(ctx context.Context, prompt, sessionID, workDir, model string, onEvent func(claude.StreamEvent)) (claude.Result, error)
 }
 
-// GeminiRunner menjalankan prompt lewat Gemini CLI (nil bila tidak diaktifkan).
-type GeminiRunner interface {
+// APIRunner mengeksekusi prompt dan mengembalikan string jawaban (Gemini/Kiro).
+type APIRunner interface {
 	Run(ctx context.Context, prompt, workDir, model string) (string, error)
 }
 
@@ -39,7 +39,8 @@ type Server struct {
 	tg        *telegram.Client
 	runner    promptRunner // jalur Telegram (boleh pakai izin interaktif)
 	apiRunner promptRunner // jalur API (tanpa izin interaktif)
-	gemini    GeminiRunner // engine Gemini untuk API (nil bila nonaktif)
+	gemini    APIRunner    // engine Gemini untuk API (nil bila nonaktif)
+	kiro      APIRunner    // engine Kiro untuk API (nil bila nonaktif)
 	store     *store.Store
 	reg       *approval.Registry // nil bila izin interaktif nonaktif
 
@@ -53,8 +54,8 @@ type Server struct {
 
 // New membangun Server. reg boleh nil bila izin interaktif tidak dipakai.
 // apiRunner dipakai jalur API (sebaiknya tanpa argumen --permission-prompt-tool).
-// gem boleh nil bila Gemini tidak diaktifkan.
-func New(cfg *config.Config, tg *telegram.Client, runner, apiRunner promptRunner, gem GeminiRunner, st *store.Store, reg *approval.Registry) *Server {
+// gem/kir boleh nil bila Gemini/Kiro tidak diaktifkan.
+func New(cfg *config.Config, tg *telegram.Client, runner, apiRunner promptRunner, gem APIRunner, kir APIRunner, st *store.Store, reg *approval.Registry) *Server {
 	var apiSem chan struct{}
 	if cfg.APIMaxConcurrent > 0 {
 		apiSem = make(chan struct{}, cfg.APIMaxConcurrent)
@@ -65,6 +66,7 @@ func New(cfg *config.Config, tg *telegram.Client, runner, apiRunner promptRunner
 		runner:    runner,
 		apiRunner: apiRunner,
 		gemini:    gem,
+		kiro:      kir,
 		store:     st,
 		reg:       reg,
 		tgSem:     make(chan struct{}, 1),

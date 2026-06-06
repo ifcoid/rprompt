@@ -99,7 +99,18 @@ func (s *Server) streamChat(ctx context.Context, w http.ResponseWriter, req *cha
 	}()
 
 	var errDetail string // pesan error asli engine (mis. rate limit) bila ada
-	if isGeminiModel(req.Model) {
+	if req.Model == "kiro" {
+		if s.kiro == nil {
+			send(chatChunkDelta{Content: "[error] model Kiro tidak diaktifkan (KIRO_ENABLED=true)"}, nil)
+		} else {
+			out, err := s.kiro.Run(ctx, prompt, s.cfg.WorkDir, req.Model)
+			if err != nil {
+				errDetail = err.Error()
+			} else if out != "" {
+				send(chatChunkDelta{Content: out}, nil)
+			}
+		}
+	} else if isGeminiModel(req.Model) {
 		if s.gemini == nil {
 			send(chatChunkDelta{Content: "[error] model Gemini tidak diaktifkan (GEMINI_ENABLED=true)"}, nil)
 		} else {

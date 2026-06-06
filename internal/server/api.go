@@ -102,10 +102,23 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Pilih engine berdasarkan field "model": "gemini..." -> Gemini, selain itu
+	// Pilih engine berdasarkan field "model": "gemini..." -> Gemini, "kiro" -> Kiro CLI, selain itu
 	// -> Claude. Keduanya stateless & memakai direktori kerja default.
 	var text string
-	if isGeminiModel(req.Model) {
+	if req.Model == "kiro" {
+		if s.kiro == nil {
+			writeOpenAIError(w, http.StatusBadRequest,
+				"model Kiro tidak diaktifkan (set KIRO_ENABLED=true)", "invalid_request_error")
+			return
+		}
+		out, err := s.kiro.Run(ctx, prompt, s.cfg.WorkDir, req.Model)
+		if err != nil {
+			log.Printf("openai api kiro error: %v", err)
+			writeOpenAIError(w, http.StatusBadGateway, "Kiro error: "+err.Error(), "api_error")
+			return
+		}
+		text = out
+	} else if isGeminiModel(req.Model) {
 		if s.gemini == nil {
 			writeOpenAIError(w, http.StatusBadRequest,
 				"model Gemini tidak diaktifkan (set GEMINI_ENABLED=true)", "invalid_request_error")
@@ -175,6 +188,9 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 		// Gemini: nama yang diteruskan ke `gemini -m` (apa pun gemini-* valid).
 		data = add(data, "google",
 			"gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-3-pro-preview")
+	}
+	if s.kiro != nil {
+		data = add(data, "kiro", "kiro")
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
 }
