@@ -143,9 +143,22 @@ func (s *Server) streamChat(ctx context.Context, w http.ResponseWriter, req *cha
 
 	if errDetail != "" {
 		log.Printf("stream api error: %s", errDetail)
-		send(chatChunkDelta{Content: "\n[error] " + errDetail}, nil)
+		errObj := map[string]interface{}{
+			"error": map[string]string{
+				"message": errDetail,
+				"type":    "server_error",
+			},
+		}
+		b, _ := json.Marshal(errObj)
+		mu.Lock()
+		_, _ = w.Write([]byte("data: "))
+		_, _ = w.Write(b)
+		_, _ = w.Write([]byte("\n\n"))
+		flusher.Flush()
+		mu.Unlock()
+	} else {
+		finish := "stop"
+		send(chatChunkDelta{}, &finish)
 	}
-	finish := "stop"
-	send(chatChunkDelta{}, &finish)
 	raw("data: [DONE]\n\n")
 }
