@@ -46,7 +46,7 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
         run: |
-          garble -tiny -literals build -o build/rprompt-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} .
+          garble -tiny -literals build -o build/rprompt-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./cmd/rprompt
 
       - name: Upload Build Artifact
         uses: actions/upload-artifact@v4

@@ -110,6 +110,18 @@ Semua opsi + penjelasan ada di [`.env.example`](.env.example).
 go test ./... && go vet ./...
 ```
 
+## Automated Multi-OS Build (GitHub Actions)
+
+Repositori ini dilengkapi dengan *workflow* GitHub Actions yang otomatis melakukan kompilasi (*cross-compile*) ke berbagai OS (Windows, Linux, macOS) setiap kali ada *push* ke *branch* `main`. Hasil kompilasi juga menggunakan `garble` sebagai standar industri untuk menghindari *reverse engineering* (obfuscation), lalu diunggah otomatis ke repositori `llm-y/download`.
+
+**Setup Environment / Secret yang Wajib Disiapkan:**
+Agar *workflow* bisa berjalan dan mengunggah ke repositori target, Anda harus mengatur *environment/secret* di pengaturan repositori GitHub Anda:
+1. Buat **Personal Access Token (PAT)** di akun GitHub Anda dengan izin `repo` (atau `contents: write`).
+2. Buka halaman repo `rprompt` di GitHub -> **Settings** -> **Secrets and variables** -> **Actions**.
+3. Klik **New repository secret**.
+4. Isi **Name** dengan `GH_PAT`.
+5. Isi **Secret** dengan token PAT yang baru Anda buat.
+
 ## Keamanan
 
 Bot menjalankan Claude Code di laptop Anda. Jaga `.env`, `TELEGRAM_BOT_TOKEN`, dan
