@@ -32,23 +32,16 @@ Sebelum memulai, pastikan Anda telah menginstal 3 program AI bawaan berikut di k
 ---
 
 ## 4. Pengaturan Variabel Environment (OS)
-Agar aplikasi berjalan otomatis membuka API ke publik dan menyambungkannya ke Telegram, setel *Environment Variables* di komputer Anda sebelum menjalankan aplikasi.
+Agar aplikasi bisa menyambung ke Telegram Anda, setel *Environment Variables* di komputer Anda sebelum menjalankannya. Anda hanya wajib mengisi dua hal ini:
 
-Berikut adalah konfigurasi yang harus diisi:
 *   `TELEGRAM_BOT_TOKEN` = *(Token dari BotFather)*
 *   `ALLOWED_CHAT_IDS` = *(Chat ID Anda dari userinfobot)*
-*   `TELEGRAM_MODE` = `webhook` *(Agar lebih responsif via cloudflared)*
-*   `AUTO_TUNNEL` = `true` *(Menjalankan cloudflared otomatis)*
-*   `API_ENABLED` = `true` *(Menyalakan HTTP API agar bisa diakses dari luar)*
 
 > **Cara 1: Windows (Permanen via Terminal CMD)**
 > Buka **Command Prompt**, lalu *copy-paste* perintah ini satu per satu (tekan Enter). Ini akan menyimpannya ke sistem secara permanen.
 > ```cmd
 > setx TELEGRAM_BOT_TOKEN "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
 > setx ALLOWED_CHAT_IDS "987654321"
-> setx TELEGRAM_MODE "webhook"
-> setx AUTO_TUNNEL "true"
-> setx API_ENABLED "true"
 > ```
 > *Catatan PENTING: Setelah menekan Enter untuk semua perintah di atas, Anda **wajib menutup** jendela CMD tersebut dan membuka CMD yang baru agar pengaturannya mulai aktif.*
 >
@@ -56,16 +49,13 @@ Berikut adalah konfigurasi yang harus diisi:
 > 1. Buka Start Menu Windows, ketik **"Environment Variables"**, lalu pilih **Edit the system environment variables**.
 > 2. Klik tombol **Environment Variables...** di pojok kanan bawah.
 > 3. Di bagian *User variables*, klik **New...**
-> 4. Masukkan nama (contoh: `TELEGRAM_MODE`) dan *value* (`webhook`). Ulangi untuk ke-5 variabel di atas, lalu klik OK.
+> 4. Masukkan nama (contoh: `TELEGRAM_BOT_TOKEN`) dan *value*-nya. Ulangi untuk variabel kedua, lalu klik OK.
 
 > **Tips Linux / Mac (Permanen):**
 > Tambahkan baris berikut ke bagian paling bawah *file* konfigurasi shell Anda (misalnya `~/.bashrc` atau `~/.zshrc`), lalu simpan dan *restart* terminal Anda:
 > ```bash
 > export TELEGRAM_BOT_TOKEN="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
 > export ALLOWED_CHAT_IDS="987654321"
-> export TELEGRAM_MODE="webhook"
-> export AUTO_TUNNEL="true"
-> export API_ENABLED="true"
 > ```
 
 ---

@@ -169,7 +169,15 @@ func main() {
 	} else if cfg.AutoTunnel {
 		t, err := tunnel.Start(context.Background(), cfg.CloudflaredBin, cfg.LocalPort(), 60*time.Second)
 		if err != nil {
-			log.Fatalf("auto-tunnel: %v", err)
+			fmt.Printf("\n[ERROR CRITICAL] Gagal menjalankan cloudflared!\n")
+			fmt.Printf("Aplikasi mencoba mengaktifkan mode AUTO_TUNNEL, tetapi aplikasi 'cloudflared' tidak ditemukan atau gagal dijalankan.\n")
+			fmt.Printf("Silakan jalankan secara manual atau pastikan Anda telah mengunduh 'cloudflared' di komputer ini.\n")
+			fmt.Printf("\nCara perbaikan:\n")
+			fmt.Printf("1. Unduh 'cloudflared' dari https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/\n")
+			fmt.Printf("2. Taruh file 'cloudflared' di folder yang sama dengan rprompt, ATAU masukkan ke PATH OS Anda.\n")
+			fmt.Printf("3. Jalankan ulang rprompt.\n\n")
+			fmt.Printf("Detail Error: %v\n\n", err)
+			os.Exit(1)
 		}
 		tun = t
 		log.Printf("cloudflared tunnel: %s", tun.URL)
@@ -310,7 +318,8 @@ func printReady(cfg *config.Config) {
 	}
 	api := "nonaktif (set API_ENABLED=true bila perlu)"
 	if cfg.APIEnabled {
-		api = "aktif di " + cfg.ListenAddr + " (POST /v1/chat/completions)"
+		api = "aktif di " + cfg.ListenAddr + " (POST /v1/chat/completions)\n"
+		api += "    API Token: " + cfg.APIToken
 	}
 	fmt.Printf("\n==> rprompt SIAP. Tekan Ctrl-C untuk berhenti.\n")
 	fmt.Printf("    Telegram : %s\n", tg)

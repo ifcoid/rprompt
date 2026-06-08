@@ -4,6 +4,7 @@ package config
 
 import (
 	"bufio"
+	"crypto/rand"
 	"fmt"
 	"net"
 	"os"
@@ -85,6 +86,10 @@ func (c *Config) MCPURL() string {
 func Load() (*Config, error) {
 	loadDotEnv(".env")
 
+	wd, err := os.Getwd()
+	if err != nil {
+		wd = "."
+	}
 	c := &Config{
 		BotToken:      os.Getenv("TELEGRAM_BOT_TOKEN"),
 		ListenAddr:    getenv("LISTEN_ADDR", ":8080"),
@@ -92,7 +97,7 @@ func Load() (*Config, error) {
 		WebhookURL:    strings.TrimRight(os.Getenv("WEBHOOK_URL"), "/"),
 		WebhookSecret: os.Getenv("WEBHOOK_SECRET"),
 		ClaudeBin:     getenv("CLAUDE_BIN", "claude"),
-		WorkDir:       getenv("WORK_DIR", "."),
+		WorkDir:       getenv("WORK_DIR", wd),
 		SessionFile:   getenv("SESSION_FILE", "sessions.json"),
 		AllowedChats:  map[int64]bool{},
 	}
@@ -150,7 +155,7 @@ func Load() (*Config, error) {
 	}
 	c.ApprovalTimeout = time.Duration(an) * time.Second
 
-	c.AutoTunnel = isTrue(os.Getenv("AUTO_TUNNEL"))
+	c.AutoTunnel = isTrue(getenv("AUTO_TUNNEL", "true"))
 	c.CloudflaredBin = getenv("CLOUDFLARED_BIN", "cloudflared")
 	c.CloudflaredTunnel = strings.TrimSpace(os.Getenv("CLOUDFLARED_TUNNEL"))
 	if c.AutoTunnel && c.CloudflaredTunnel != "" {
@@ -161,10 +166,12 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("WEBHOOK_URL wajib diisi bila SET_WEBHOOK_ON_START=true")
 	}
 
-	c.APIEnabled = isTrue(os.Getenv("API_ENABLED"))
+	c.APIEnabled = isTrue(getenv("API_ENABLED", "true"))
 	c.APIToken = os.Getenv("API_TOKEN")
 	if c.APIEnabled && c.APIToken == "" {
-		return nil, fmt.Errorf("API_TOKEN wajib diisi bila API_ENABLED=true")
+		b := make([]byte, 16)
+		rand.Read(b)
+		c.APIToken = fmt.Sprintf("rprompt-sec-%x", b)
 	}
 	amc := getenv("API_MAX_CONCURRENT", "0")
 	mc, err := strconv.Atoi(amc)
