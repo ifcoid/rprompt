@@ -1,0 +1,87 @@
+name: Cross-Compile and Publish
+
+on:
+  push:
+    branches:
+      - main # Trigger on every push to main branch
+  workflow_dispatch: # Allow manual trigger from GitHub UI
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            ext: ''
+          - goos: linux
+            goarch: arm64
+            ext: ''
+          - goos: windows
+            goarch: amd64
+            ext: '.exe'
+          - goos: darwin
+            goarch: amd64
+            ext: ''
+          - goos: darwin
+            goarch: arm64
+            ext: ''
+    
+    steps:
+      - name: Checkout Source Repo
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22' # Change this if your project requires a specific Go version
+
+      - name: Install Garble (Obfuscator)
+        run: go install mvdan.cc/garble@latest
+
+      - name: Build Binary (Obfuscated)
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          garble -tiny -literals build -o build/rprompt-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} .
+
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rprompt-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: build/rprompt-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: binaries
+
+      - name: Checkout Download Repo
+        uses: actions/checkout@v4
+        with:
+          repository: llm-y/download
+          token: ${{ secrets.GH_PAT }}
+          path: download-repo
+
+      - name: Copy Binaries to Download Repo
+        run: |
+          # The download-artifact action creates a folder for each artifact name
+          # We'll flatten them into the bin/ folder of the download repo
+          mkdir -p download-repo/bin
+          find binaries -type f -exec cp {} download-repo/bin/ \;
+
+      - name: Commit and Push
+        run: |
+          cd download-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add bin/
+          git commit -m "Automated build and publish of rprompt binaries" || echo "No changes to commit"
+          git push origin main
