@@ -41,6 +41,7 @@ type Server struct {
 	apiRunner promptRunner // jalur API (tanpa izin interaktif)
 	gemini    APIRunner    // engine Gemini untuk API (nil bila nonaktif)
 	kiro      APIRunner    // engine Kiro untuk API (nil bila nonaktif)
+	bob       APIRunner    // engine Bob untuk API (nil bila nonaktif)
 	store     *store.Store
 	reg       *approval.Registry // nil bila izin interaktif nonaktif
 
@@ -54,8 +55,8 @@ type Server struct {
 
 // New membangun Server. reg boleh nil bila izin interaktif tidak dipakai.
 // apiRunner dipakai jalur API (sebaiknya tanpa argumen --permission-prompt-tool).
-// gem/kir boleh nil bila Gemini/Kiro tidak diaktifkan.
-func New(cfg *config.Config, tg *telegram.Client, runner, apiRunner promptRunner, gem APIRunner, kir APIRunner, st *store.Store, reg *approval.Registry) *Server {
+// gem/kir/bob boleh nil bila Gemini/Kiro/Bob tidak diaktifkan.
+func New(cfg *config.Config, tg *telegram.Client, runner, apiRunner promptRunner, gem APIRunner, kir APIRunner, bob APIRunner, st *store.Store, reg *approval.Registry) *Server {
 	var apiSem chan struct{}
 	if cfg.APIMaxConcurrent > 0 {
 		apiSem = make(chan struct{}, cfg.APIMaxConcurrent)
@@ -67,6 +68,7 @@ func New(cfg *config.Config, tg *telegram.Client, runner, apiRunner promptRunner
 		apiRunner: apiRunner,
 		gemini:    gem,
 		kiro:      kir,
+		bob:       bob,
 		store:     st,
 		reg:       reg,
 		tgSem:     make(chan struct{}, 1),

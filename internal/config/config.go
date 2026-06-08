@@ -40,6 +40,11 @@ type Config struct {
 	KiroBin       string   // path binary kiro-cli
 	KiroExtraArgs []string // argumen tambahan untuk kiro-cli
 
+	// Bob Shell CLI (opsional) untuk routing via field "model" di API.
+	BobEnabled   bool     // aktifkan engine Bob
+	BobBin       string   // path binary bob
+	BobExtraArgs []string // argumen tambahan untuk bob
+
 	// Izin interaktif via tombol Telegram.
 	Interactive     bool          // aktifkan persetujuan izin tool via Telegram
 	MCPAddr         string        // alamat listen lokal server MCP, mis. "127.0.0.1:8765"
@@ -132,6 +137,12 @@ func Load() (*Config, error) {
 	c.KiroBin = getenv("KIRO_BIN", "kiro-cli")
 	if k := strings.TrimSpace(os.Getenv("KIRO_EXTRA_ARGS")); k != "" {
 		c.KiroExtraArgs = strings.Fields(k)
+	}
+
+	c.BobEnabled = isTrue(os.Getenv("BOB_ENABLED"))
+	c.BobBin = getenv("BOB_BIN", "bob")
+	if b := strings.TrimSpace(os.Getenv("BOB_EXTRA_ARGS")); b != "" {
+		c.BobExtraArgs = strings.Fields(b)
 	}
 
 	secs := getenv("CLAUDE_TIMEOUT_SECONDS", "600")

@@ -118,6 +118,19 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		text = out
+	} else if isBobModel(req.Model) {
+		if s.bob == nil {
+			writeOpenAIError(w, http.StatusBadRequest,
+				"model Bob tidak diaktifkan (set BOB_ENABLED=true)", "invalid_request_error")
+			return
+		}
+		out, err := s.bob.Run(ctx, prompt, s.cfg.WorkDir, req.Model)
+		if err != nil {
+			log.Printf("openai api bob error: %v", err)
+			writeOpenAIError(w, http.StatusBadGateway, "Bob error: "+err.Error(), "api_error")
+			return
+		}
+		text = out
 	} else if isGeminiModel(req.Model) {
 		if s.gemini == nil {
 			writeOpenAIError(w, http.StatusBadRequest,
@@ -192,6 +205,9 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	if s.kiro != nil {
 		data = add(data, "kiro", "kiro")
 	}
+	if s.bob != nil {
+		data = add(data, "ibm", "bob", "bob-shell")
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
 }
 
@@ -200,6 +216,12 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 // isGeminiModel mengembalikan true bila nama model menunjuk ke engine Gemini.
 func isGeminiModel(model string) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "gemini")
+}
+
+// isBobModel mengembalikan true bila nama model menunjuk ke engine Bob.
+func isBobModel(model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(m, "bob")
 }
 
 // claudeModelOverride memetakan field "model" OpenAI ke argumen --model claude.

@@ -33,7 +33,7 @@ Pindah komputer? `git clone` → salin `.env` → `claude login` → jalankan.
 - **File**: kirim foto/dokumen untuk dianalisis, `/get <path>` ambil berkas,
   gambar yang disebut di jawaban dikirim otomatis.
 - **Izin tool via tombol** Telegram (opsional).
-- **HTTP API OpenAI-compatible** dengan 2 engine: **Claude** & **Gemini CLI**.
+- **HTTP API OpenAI-compatible** dengan 4 engine: **Claude**, **Gemini CLI**, **Kiro CLI**, & **Bob Shell**.
 - Whitelist chat id + secret token; Telegram serial, API paralel.
 
 ## Perintah bot
@@ -63,14 +63,17 @@ from openai import OpenAI
 c = OpenAI(base_url="http://localhost:8080/v1", api_key="<API_TOKEN>")
 c.chat.completions.create(model="claude-code",      messages=[...])               # Claude
 c.chat.completions.create(model="gemini-2.5-flash", messages=[...], stream=True)  # Gemini, streaming
+c.chat.completions.create(model="kiro",             messages=[...])               # Kiro
+c.chat.completions.create(model="bob",              messages=[...])               # Bob Shell
 ```
 
-- **Engine via `model`**: diawali `gemini` → Gemini CLI; selain itu → Claude.
+- **Engine via `model`**: "kiro" → Kiro CLI; "bob" atau "bob-shell" → Bob Shell; diawali `gemini` → Gemini CLI; selain itu → Claude.
 - **Streaming** (`stream:true`): SSE + keepalive — **wajib untuk output panjang di
   balik Cloudflare** (hindari timeout 524 ~100s). `stream:false` balas JSON utuh.
 - **Stateless** (kirim seluruh `messages` tiap call), **paralel** (`API_MAX_CONCURRENT`).
-- **Gemini**: `npm i -g @google/gemini-cli` (Node 20+) lalu `gemini` login →
-  `GEMINI_ENABLED=true`. `GEMINI_USE_OAUTH=true` untuk paksa pakai login CLI.
+- **Gemini**: `npm i -g @google/gemini-cli` (Node 20+) lalu `gemini` login → `GEMINI_ENABLED=true`.
+- **Kiro**: `npm i -g kiro-cli` → `KIRO_ENABLED=true`.
+- **Bob Shell**: `npm i -g @ibm/bob` → `BOB_ENABLED=true`.
 
 ## Ekspos ke internet
 

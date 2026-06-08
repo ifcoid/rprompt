@@ -3,13 +3,13 @@
 Dokumen ini adalah panduan praktis bagi Anda (pengguna akhir) yang ingin langsung menggunakan `rprompt` tanpa perlu repot melakukan *coding*. 
 
 Aplikasi `rprompt` memungkinkan Anda:
-1. Mengendalikan AI (Claude, Gemini, Kiro) di komputer Anda langsung dari chat Telegram di HP Anda.
+1. Mengendalikan AI (Claude, Gemini, Kiro, Bob) di komputer Anda langsung dari chat Telegram di HP Anda.
 2. Membuka **OpenAI-compatible HTTP API** yang bisa diakses secara publik lewat internet dengan domain dinamis otomatis.
 
 ---
 
 ## 1. Persiapan Awal (Prasyarat Wajib)
-Sebelum memulai, pastikan Anda telah menginstal 3 program AI bawaan berikut di komputer Anda. Ketiganya membutuhkan NodeJS (NPM) untuk diinstal:
+Sebelum memulai, pastikan Anda telah menginstal program AI bawaan berikut di komputer Anda. Semuanya membutuhkan NodeJS (NPM) untuk diinstal:
 
 1. **Claude Code**:
    - Install: Buka terminal dan jalankan `npm install -g @anthropic-ai/claude-code`
@@ -18,7 +18,9 @@ Sebelum memulai, pastikan Anda telah menginstal 3 program AI bawaan berikut di k
    - Install: `npm install -g @google/gemini-cli`
    - Login: Ketik `gemini login` di terminal.
 3. **Kiro CLI**:
-   - Pastikan Anda sudah menginstal Kiro CLI ke dalam sistem OS Anda.
+   - Install: Buka terminal dan jalankan `npm install -g kiro-cli` (atau sesuai petunjuk resminya).
+4. **Bob Shell CLI**:
+   - Install: Buka terminal dan jalankan `npm install -g @ibm/bob`
 
 ## 2. Unduh Aplikasi Rprompt & Cloudflared
 1. **Rprompt**: Anda tidak perlu menginstal bahasa pemrograman (Go). Cukup unduh *file binary* yang sudah dikompilasi sesuai OS komputer Anda (Windows, Linux, atau macOS) dari repositori `https://github.com/llm-y/download` (di dalam folder `bin/`).
@@ -96,10 +98,16 @@ response = c.chat.completions.create(
     messages=[{"role": "user", "content": "Halo Claude!"}]
 )
 
-# Atau chat dengan Gemini
+# Chat dengan Gemini
 response = c.chat.completions.create(
     model="gemini-2.5-flash", 
     messages=[{"role": "user", "content": "Halo Gemini!"}]
+)
+
+# Chat dengan Bob Shell
+response = c.chat.completions.create(
+    model="bob", 
+    messages=[{"role": "user", "content": "Halo Bob!"}]
 )
 ```
 

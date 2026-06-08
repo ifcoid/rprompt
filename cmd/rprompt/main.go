@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/awangga/rprompt/internal/approval"
+	"github.com/awangga/rprompt/internal/bob"
 	"github.com/awangga/rprompt/internal/claude"
 	"github.com/awangga/rprompt/internal/config"
 	"github.com/awangga/rprompt/internal/gemini"
@@ -129,7 +130,14 @@ func main() {
 		log.Printf("engine Kiro AKTIF (bin %q)", cfg.KiroBin)
 	}
 
-	srv := server.New(cfg, tg, runner, &apiRunner, gem, kir, st, reg)
+	// Engine Bob Shell CLI opsional untuk API (routing via field "model").
+	var bRunner server.APIRunner
+	if cfg.BobEnabled {
+		bRunner = bob.New(cfg.BobBin, cfg.BobExtraArgs)
+		log.Printf("engine Bob AKTIF (bin %q)", cfg.BobBin)
+	}
+
+	srv := server.New(cfg, tg, runner, &apiRunner, gem, kir, bRunner, st, reg)
 
 	httpSrv := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	httpLn := mustListen(cfg.ListenAddr, "server HTTP")
@@ -324,8 +332,8 @@ func printReady(cfg *config.Config) {
 	fmt.Printf("\n==> rprompt SIAP. Tekan Ctrl-C untuk berhenti.\n")
 	fmt.Printf("    Telegram : %s\n", tg)
 	fmt.Printf("    HTTP API : %s\n", api)
-	if cfg.GeminiEnabled || cfg.KiroEnabled {
-		fmt.Printf("    Engine   : Claude + Gemini/Kiro (pilih via field \"model\")\n")
+	if cfg.GeminiEnabled || cfg.KiroEnabled || cfg.BobEnabled {
+		fmt.Printf("    Engine   : Claude + Gemini/Kiro/Bob (pilih via field \"model\")\n")
 	}
 	fmt.Println()
 }
