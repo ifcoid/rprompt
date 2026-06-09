@@ -42,8 +42,8 @@ func (r *Runner) command(ctx context.Context, args []string) *exec.Cmd {
 
 // Run menjalankan prompt dan mengembalikan teks jawaban bersih tanpa ANSI.
 func (r *Runner) Run(ctx context.Context, prompt, workDir, model string) (string, error) {
-	// bob <prompt> -y
-	args := []string{prompt, "-y"}
+	// bob -y (prompt dilempar via stdin agar tidak kena OS limit di Windows)
+	args := []string{"-y"}
 	args = append(args, r.ExtraArgs...)
 
 	// Opsional: Jika menerima flag --model, kita bisa meneruskannya
@@ -55,6 +55,7 @@ func (r *Runner) Run(ctx context.Context, prompt, workDir, model string) (string
 	if workDir != "" {
 		cmd.Dir = workDir
 	}
+	cmd.Stdin = strings.NewReader(prompt)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

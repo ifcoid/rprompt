@@ -44,8 +44,9 @@ func (r *Runner) command(ctx context.Context, args []string) *exec.Cmd {
 
 // Run menjalankan prompt dan mengembalikan teks jawaban bersih tanpa ANSI.
 func (r *Runner) Run(ctx context.Context, prompt, workDir, model string) (string, error) {
-	// kiro-cli chat <prompt> --no-interactive
-	args := []string{"chat", prompt, "--no-interactive"}
+	// kiro-cli chat --no-interactive
+	// prompt dilempar via stdin untuk menghindari error "filename too long" di Windows
+	args := []string{"chat", "--no-interactive"}
 	args = append(args, r.ExtraArgs...)
 
 	// Opsional: Jika kiro menerima flag --model, kita bisa meneruskannya
@@ -57,6 +58,7 @@ func (r *Runner) Run(ctx context.Context, prompt, workDir, model string) (string
 	if workDir != "" {
 		cmd.Dir = workDir
 	}
+	cmd.Stdin = strings.NewReader(prompt)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
