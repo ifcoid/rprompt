@@ -126,20 +126,20 @@ func Load() (*Config, error) {
 		c.Projects[name] = path
 	}
 
-	c.GeminiEnabled = isTrue(os.Getenv("GEMINI_ENABLED"))
+	c.GeminiEnabled = getenvBool("GEMINI_ENABLED", true)
 	c.GeminiBin = getenv("GEMINI_BIN", "gemini")
 	c.GeminiUseOAuth = isTrue(os.Getenv("GEMINI_USE_OAUTH"))
 	if g := strings.TrimSpace(os.Getenv("GEMINI_EXTRA_ARGS")); g != "" {
 		c.GeminiExtraArgs = strings.Fields(g)
 	}
 
-	c.KiroEnabled = isTrue(os.Getenv("KIRO_ENABLED"))
+	c.KiroEnabled = getenvBool("KIRO_ENABLED", true)
 	c.KiroBin = getenv("KIRO_BIN", "kiro-cli")
 	if k := strings.TrimSpace(os.Getenv("KIRO_EXTRA_ARGS")); k != "" {
 		c.KiroExtraArgs = strings.Fields(k)
 	}
 
-	c.BobEnabled = isTrue(os.Getenv("BOB_ENABLED"))
+	c.BobEnabled = getenvBool("BOB_ENABLED", true)
 	c.BobBin = getenv("BOB_BIN", "bob")
 	if b := strings.TrimSpace(os.Getenv("BOB_EXTRA_ARGS")); b != "" {
 		c.BobExtraArgs = strings.Fields(b)
@@ -230,6 +230,13 @@ func isTrue(v string) bool {
 		return true
 	}
 	return false
+}
+
+func getenvBool(key string, def bool) bool {
+	if val, ok := os.LookupEnv(key); ok {
+		return isTrue(val)
+	}
+	return def
 }
 
 // loadDotEnv memuat pasangan KEY=VALUE dari file .env ke environment.
