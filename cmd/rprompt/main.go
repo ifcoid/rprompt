@@ -327,7 +327,11 @@ func printReady(cfg *config.Config) {
 	api := "nonaktif (set API_ENABLED=true bila perlu)"
 	if cfg.APIEnabled {
 		api = "aktif di " + cfg.ListenAddr + " (POST /v1/chat/completions)\n"
-		api += "    API Token: " + cfg.APIToken
+		source := "(dari os env)"
+		if strings.HasPrefix(cfg.APIToken, "rprompt-sec-") {
+			source = "(auto-generated)"
+		}
+		api += "    API Token: " + cfg.APIToken + " " + source
 	}
 	fmt.Printf("\n==> rprompt SIAP. Tekan Ctrl-C untuk berhenti.\n")
 	fmt.Printf("    Telegram : %s\n", tg)
