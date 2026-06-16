@@ -97,7 +97,7 @@ func Load() (*Config, error) {
 	}
 	c := &Config{
 		BotToken:      os.Getenv("TELEGRAM_BOT_TOKEN"),
-		ListenAddr:    getenv("LISTEN_ADDR", ":8080"),
+		ListenAddr:    normalizeAddr(getenv("LISTEN_ADDR", ":8080")),
 		WebhookPath:   getenv("WEBHOOK_PATH", "/telegram/webhook"),
 		WebhookURL:    strings.TrimRight(os.Getenv("WEBHOOK_URL"), "/"),
 		WebhookSecret: os.Getenv("WEBHOOK_SECRET"),
@@ -153,7 +153,7 @@ func Load() (*Config, error) {
 	c.Timeout = time.Duration(n) * time.Second
 
 	c.Interactive = isTrue(os.Getenv("INTERACTIVE_PERMISSIONS"))
-	c.MCPAddr = getenv("MCP_ADDR", "127.0.0.1:8765")
+	c.MCPAddr = normalizeAddr(getenv("MCP_ADDR", "127.0.0.1:8765"))
 	c.MCPPath = getenv("MCP_PATH", "/mcp")
 	c.ResultFormat = getenv("PERMISSION_RESULT_FORMAT", "behavior")
 	if c.ResultFormat != "behavior" && c.ResultFormat != "hook" {
@@ -215,6 +215,26 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("ALLOWED_CHAT_IDS wajib diisi (minimal 1 chat id)")
 	}
 	return c, nil
+}
+
+// normalizeAddr memastikan alamat listen memiliki format yang benar untuk
+// net.Listen. Jika user hanya memasukkan angka port (mis. "56789"), otomatis
+// diawali titik dua menjadi ":56789". Jika sudah mengandung ":" (mis.
+// ":8080" atau "0.0.0.0:8080"), dikembalikan apa adanya.
+func normalizeAddr(addr string) string {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return ":8080"
+	}
+	// Sudah memiliki format host:port atau :port
+	if strings.Contains(addr, ":") {
+		return addr
+	}
+	// Hanya angka port tanpa ":"
+	if _, err := strconv.Atoi(addr); err == nil {
+		return ":" + addr
+	}
+	return addr
 }
 
 func getenv(key, def string) string {
