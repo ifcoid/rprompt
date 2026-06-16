@@ -181,7 +181,9 @@ func Load() (*Config, error) {
 	c.APIToken = os.Getenv("API_TOKEN")
 	if c.APIEnabled && c.APIToken == "" {
 		b := make([]byte, 16)
-		rand.Read(b)
+		if _, err := rand.Read(b); err != nil {
+			return nil, fmt.Errorf("gagal membuat API_TOKEN acak: %w", err)
+		}
 		c.APIToken = fmt.Sprintf("rprompt-sec-%x", b)
 	}
 	amc := getenv("API_MAX_CONCURRENT", "0")
