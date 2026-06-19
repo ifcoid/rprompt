@@ -110,6 +110,17 @@ func (s *Server) streamChat(ctx context.Context, w http.ResponseWriter, req *cha
 				send(chatChunkDelta{Content: out}, nil)
 			}
 		}
+	} else if isBobModel(req.Model) {
+		if s.bob == nil {
+			send(chatChunkDelta{Content: "[error] model Bob tidak diaktifkan (BOB_ENABLED=true)"}, nil)
+		} else {
+			out, err := s.bob.Run(ctx, prompt, s.cfg.WorkDir, req.Model)
+			if err != nil {
+				errDetail = err.Error()
+			} else if out != "" {
+				send(chatChunkDelta{Content: out}, nil)
+			}
+		}
 	} else if isGeminiModel(req.Model) {
 		if s.agy == nil {
 			send(chatChunkDelta{Content: "[error] model AGY tidak diaktifkan (AGY_ENABLED=true)"}, nil)
