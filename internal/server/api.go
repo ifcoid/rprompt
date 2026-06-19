@@ -102,7 +102,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Pilih engine berdasarkan field "model": "gemini..." -> Gemini, "kiro" -> Kiro CLI, selain itu
+	// Pilih engine berdasarkan field "model": "gemini..." -> AGY, "kiro" -> Kiro CLI, selain itu
 	// -> Claude. Keduanya stateless & memakai direktori kerja default.
 	var text string
 	if req.Model == "kiro" {
@@ -132,15 +132,15 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		}
 		text = out
 	} else if isGeminiModel(req.Model) {
-		if s.gemini == nil {
+		if s.agy == nil {
 			writeOpenAIError(w, http.StatusBadRequest,
-				"model Gemini tidak diaktifkan (set GEMINI_ENABLED=true)", "invalid_request_error")
+				"model AGY tidak diaktifkan (set AGY_ENABLED=true)", "invalid_request_error")
 			return
 		}
-		out, err := s.gemini.Run(ctx, prompt, s.cfg.WorkDir, req.Model)
+		out, err := s.agy.Run(ctx, prompt, s.cfg.WorkDir, req.Model)
 		if err != nil {
-			log.Printf("openai api gemini error: %v", err)
-			writeOpenAIError(w, http.StatusBadGateway, "Gemini error: "+err.Error(), "api_error")
+			log.Printf("openai api agy error: %v", err)
+			writeOpenAIError(w, http.StatusBadGateway, "AGY error: "+err.Error(), "api_error")
 			return
 		}
 		text = out
@@ -197,8 +197,8 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	var data []map[string]any
 	// Claude: default + alias yang diteruskan ke `claude --model`.
 	data = add(data, "anthropic", apiModelName, "opus", "sonnet", "haiku")
-	if s.gemini != nil {
-		// Gemini: nama yang diteruskan ke `gemini -m` (apa pun gemini-* valid).
+	if s.agy != nil {
+		// AGY: nama yang diteruskan ke `agy -m` (apa pun gemini-* valid).
 		data = add(data, "google",
 			"gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-3-pro-preview")
 	}

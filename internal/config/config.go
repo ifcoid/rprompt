@@ -29,11 +29,11 @@ type Config struct {
 	SessionFile   string            // file penyimpanan session id per chat
 	Timeout       time.Duration     // batas waktu eksekusi satu prompt
 
-	// Gemini CLI (opsional) untuk routing via field "model" di API.
-	GeminiEnabled   bool     // aktifkan engine Gemini
-	GeminiBin       string   // path binary gemini
-	GeminiExtraArgs []string // argumen tambahan untuk gemini
-	GeminiUseOAuth  bool     // paksa login CLI (strip GEMINI_API_KEY/GOOGLE_API_KEY)
+	// AGY CLI (opsional) untuk routing via field "model" di API.
+	AgyEnabled   bool     // aktifkan engine AGY
+	AgyBin       string   // path binary agy
+	AgyExtraArgs []string // argumen tambahan untuk agy
+	AgyUseOAuth  bool     // paksa login CLI (strip AGY_API_KEY/GOOGLE_API_KEY)
 
 	// Kiro CLI (opsional) untuk routing via field "model" di API.
 	KiroEnabled   bool     // aktifkan engine Kiro
@@ -126,11 +126,11 @@ func Load() (*Config, error) {
 		c.Projects[name] = path
 	}
 
-	c.GeminiEnabled = getenvBool("GEMINI_ENABLED", true)
-	c.GeminiBin = getenv("GEMINI_BIN", "gemini")
-	c.GeminiUseOAuth = isTrue(os.Getenv("GEMINI_USE_OAUTH"))
-	if g := strings.TrimSpace(os.Getenv("GEMINI_EXTRA_ARGS")); g != "" {
-		c.GeminiExtraArgs = strings.Fields(g)
+	c.AgyEnabled = getenvBool("AGY_ENABLED", true)
+	c.AgyBin = getenv("AGY_BIN", "agy")
+	c.AgyUseOAuth = isTrue(os.Getenv("AGY_USE_OAUTH"))
+	if g := strings.TrimSpace(os.Getenv("AGY_EXTRA_ARGS")); g != "" {
+		c.AgyExtraArgs = strings.Fields(g)
 	}
 
 	c.KiroEnabled = getenvBool("KIRO_ENABLED", true)

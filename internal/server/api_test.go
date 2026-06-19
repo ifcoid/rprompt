@@ -47,15 +47,15 @@ func (b *blockingRunner) RunStream(_ context.Context, _, _, _, _ string, _ func(
 	return claude.Result{Text: "done"}, nil
 }
 
-// fakeGemini mengimplementasikan GeminiRunner.
-type fakeGemini struct {
+// fakeAgy mengimplementasikan AgyRunner.
+type fakeAgy struct {
 	out       string
 	err       error
 	gotPrompt string
 	gotModel  string
 }
 
-func (g *fakeGemini) Run(_ context.Context, prompt, _, model string) (string, error) {
+func (g *fakeAgy) Run(_ context.Context, prompt, _, model string) (string, error) {
 	g.gotPrompt = prompt
 	g.gotModel = model
 	return g.out, g.err
@@ -140,9 +140,9 @@ func TestChatStreaming(t *testing.T) {
 }
 
 func TestChatStreamingGemini(t *testing.T) {
-	gem := &fakeGemini{out: "jawaban gemini"}
+	gem := &fakeAgy{out: "jawaban gemini"}
 	s := newAPITestServer(&fakeRunner{})
-	s.gemini = gem
+	s.agy = gem
 	body := `{"model":"gemini-2.5-flash","stream":true,"messages":[{"role":"user","content":"x"}]}`
 	rr := doChat(s, http.MethodPost, "Bearer rahasia", body)
 	if rr.Code != http.StatusOK {
@@ -150,10 +150,10 @@ func TestChatStreamingGemini(t *testing.T) {
 	}
 	out := rr.Body.String()
 	if !strings.Contains(out, `"content":"jawaban gemini"`) || !strings.Contains(out, "data: [DONE]") {
-		t.Errorf("output SSE Gemini tak sesuai:\n%s", out)
+		t.Errorf("output SSE AGY tak sesuai:\n%s", out)
 	}
 	if gem.gotModel != "gemini-2.5-flash" {
-		t.Errorf("model harus diteruskan ke Gemini, dapat %q", gem.gotModel)
+		t.Errorf("model harus diteruskan ke AGY, dapat %q", gem.gotModel)
 	}
 }
 
@@ -191,9 +191,9 @@ func TestChatSuccess(t *testing.T) {
 
 func TestChatGeminiRouting(t *testing.T) {
 	claudeR := &fakeRunner{result: claude.Result{Text: "dari claude"}}
-	gem := &fakeGemini{out: "dari gemini"}
+	gem := &fakeAgy{out: "dari gemini"}
 	s := newAPITestServer(claudeR)
-	s.gemini = gem
+	s.agy = gem
 
 	body := `{"model":"gemini-2.5-flash","messages":[{"role":"user","content":"hai"}]}`
 	rr := doChat(s, http.MethodPost, "Bearer rahasia", body)
@@ -203,13 +203,13 @@ func TestChatGeminiRouting(t *testing.T) {
 	var resp chatCompletionResponse
 	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
 	if resp.Choices[0].Message.Content != "dari gemini" {
-		t.Errorf("harus dijawab Gemini, dapat %q", resp.Choices[0].Message.Content)
+		t.Errorf("harus dijawab AGY, dapat %q", resp.Choices[0].Message.Content)
 	}
 	if gem.gotPrompt != "hai" {
-		t.Errorf("Gemini menerima prompt %q", gem.gotPrompt)
+		t.Errorf("AGY menerima prompt %q", gem.gotPrompt)
 	}
 	if gem.gotModel != "gemini-2.5-flash" {
-		t.Errorf("model harus diteruskan ke Gemini, dapat %q", gem.gotModel)
+		t.Errorf("model harus diteruskan ke AGY, dapat %q", gem.gotModel)
 	}
 	if claudeR.gotPrompt != "" {
 		t.Errorf("Claude tidak boleh dipanggil untuk model gemini")
@@ -247,11 +247,11 @@ func TestClaudeModelOverride(t *testing.T) {
 }
 
 func TestChatGeminiDisabled(t *testing.T) {
-	s := newAPITestServer(&fakeRunner{}) // s.gemini nil
+	s := newAPITestServer(&fakeRunner{}) // s.agy nil
 	body := `{"model":"gemini-2.5-pro","messages":[{"role":"user","content":"hai"}]}`
 	rr := doChat(s, http.MethodPost, "Bearer rahasia", body)
 	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("model gemini tanpa GEMINI_ENABLED harus 400, dapat %d", rr.Code)
+		t.Fatalf("model gemini tanpa AGY_ENABLED harus 400, dapat %d", rr.Code)
 	}
 }
 

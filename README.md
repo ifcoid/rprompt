@@ -33,7 +33,7 @@ Pindah komputer? `git clone` → salin `.env` → `claude login` → jalankan.
 - **File**: kirim foto/dokumen untuk dianalisis, `/get <path>` ambil berkas,
   gambar yang disebut di jawaban dikirim otomatis.
 - **Izin tool via tombol** Telegram (opsional).
-- **HTTP API OpenAI-compatible** dengan 4 engine: **Claude**, **Gemini CLI**, **Kiro CLI**, & **Bob Shell**.
+- **HTTP API OpenAI-compatible** dengan 4 engine: **Claude**, **AGY CLI**, **Kiro CLI**, & **Bob Shell**.
 - Whitelist chat id + secret token; Telegram serial, API paralel.
 
 ## Perintah bot
@@ -67,11 +67,11 @@ c.chat.completions.create(model="kiro",             messages=[...])             
 c.chat.completions.create(model="bob",              messages=[...])               # Bob Shell
 ```
 
-- **Engine via `model`**: "kiro" → Kiro CLI; "bob" atau "bob-shell" → Bob Shell; diawali `gemini` → Gemini CLI; selain itu → Claude.
+- **Engine via `model`**: "kiro" → Kiro CLI; "bob" atau "bob-shell" → Bob Shell; diawali `gemini` → AGY CLI; selain itu → Claude.
 - **Streaming** (`stream:true`): SSE + keepalive — **wajib untuk output panjang di
   balik Cloudflare** (hindari timeout 524 ~100s). `stream:false` balas JSON utuh.
 - **Stateless** (kirim seluruh `messages` tiap call), **paralel** (`API_MAX_CONCURRENT`).
-- **Gemini**: `npm i -g @google/gemini-cli` (Node 20+) lalu `gemini` login → `GEMINI_ENABLED=true`.
+- **AGY**: `irm https://antigravity.google/cli/install.ps1 | iex` lalu `agy login` → `AGY_ENABLED=true`.
 - **Kiro**: `npm i -g kiro-cli` → `KIRO_ENABLED=true`.
 - **Bob Shell**: `npm i -g @ibm/bob` → `BOB_ENABLED=true`.
 

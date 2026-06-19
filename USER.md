@@ -3,7 +3,7 @@
 Dokumen ini adalah panduan praktis bagi Anda (pengguna akhir) yang ingin langsung menggunakan `rprompt` tanpa perlu repot melakukan *coding*. 
 
 Aplikasi `rprompt` memungkinkan Anda:
-1. Mengendalikan AI (Claude, Gemini, Kiro, Bob) di komputer Anda langsung dari chat Telegram di HP Anda.
+1. Mengendalikan AI (Claude, AGY, Kiro, Bob) di komputer Anda langsung dari chat Telegram di HP Anda.
 2. Membuka **OpenAI-compatible HTTP API** yang bisa diakses secara publik lewat internet dengan domain dinamis otomatis.
 
 ---
@@ -14,9 +14,9 @@ Sebelum memulai, pastikan Anda telah menginstal program AI bawaan berikut di kom
 1. **Claude Code**:
    - Install: Buka terminal dan jalankan `npm install -g @anthropic-ai/claude-code`
    - Login: Ketik `claude login` di terminal dan ikuti instruksi.
-2. **Gemini CLI**:
-   - Install: `npm install -g @google/gemini-cli`
-   - Login: Ketik `gemini login` di terminal.
+2. **AGY CLI**:
+   - Install: `irm https://antigravity.google/cli/install.ps1 | iex`
+   - Login: Ketik `agy login` di terminal.
 3. **Kiro CLI**:
    - Install: Buka terminal dan jalankan `npm install -g kiro-cli` (atau sesuai petunjuk resminya).
 4. **Bob Shell CLI**:
@@ -98,10 +98,10 @@ response = c.chat.completions.create(
     messages=[{"role": "user", "content": "Halo Claude!"}]
 )
 
-# Chat dengan Gemini
+# Chat dengan AGY (tetap pakai prefix model "gemini")
 response = c.chat.completions.create(
     model="gemini-2.5-flash", 
-    messages=[{"role": "user", "content": "Halo Gemini!"}]
+    messages=[{"role": "user", "content": "Halo AGY!"}]
 )
 
 # Chat dengan Bob Shell

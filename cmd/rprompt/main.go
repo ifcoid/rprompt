@@ -28,7 +28,7 @@ import (
 	"github.com/awangga/rprompt/internal/bob"
 	"github.com/awangga/rprompt/internal/claude"
 	"github.com/awangga/rprompt/internal/config"
-	"github.com/awangga/rprompt/internal/gemini"
+	"github.com/awangga/rprompt/internal/agy"
 	"github.com/awangga/rprompt/internal/kiro"
 	"github.com/awangga/rprompt/internal/mcpserver"
 	"github.com/awangga/rprompt/internal/server"
@@ -112,15 +112,15 @@ func main() {
 	apiRunner := *runner
 	apiRunner.PermissionArgs = nil
 
-	// Engine Gemini opsional untuk API (routing via field "model").
+	// Engine AGY opsional untuk API (routing via field "model").
 	var gem server.APIRunner
-	if cfg.GeminiEnabled {
-		gem = gemini.New(cfg.GeminiBin, cfg.GeminiExtraArgs, cfg.GeminiUseOAuth)
+	if cfg.AgyEnabled {
+		gem = agy.New(cfg.AgyBin, cfg.AgyExtraArgs, cfg.AgyUseOAuth)
 		auth := "API key dari environment"
-		if cfg.GeminiUseOAuth {
+		if cfg.AgyUseOAuth {
 			auth = "login CLI (OAuth; API key di-strip)"
 		}
-		log.Printf("engine Gemini AKTIF (bin %q, auth: %s)", cfg.GeminiBin, auth)
+		log.Printf("engine AGY AKTIF (bin %q, auth: %s)", cfg.AgyBin, auth)
 	}
 
 	// Engine Kiro CLI opsional untuk API (routing via field "model").
@@ -336,8 +336,8 @@ func printReady(cfg *config.Config) {
 	fmt.Printf("\n==> rprompt SIAP. Tekan Ctrl-C untuk berhenti.\n")
 	fmt.Printf("    Telegram : %s\n", tg)
 	fmt.Printf("    HTTP API : %s\n", api)
-	if cfg.GeminiEnabled || cfg.KiroEnabled || cfg.BobEnabled {
-		fmt.Printf("    Engine   : Claude + Gemini/Kiro/Bob (pilih via field \"model\")\n")
+	if cfg.AgyEnabled || cfg.KiroEnabled || cfg.BobEnabled {
+		fmt.Printf("    Engine   : Claude + AGY/Kiro/Bob (pilih via field \"model\")\n")
 	}
 	fmt.Println()
 }

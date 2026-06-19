@@ -8,7 +8,7 @@
 # otomatis saat rprompt berhenti. Mode Telegram mengikuti .env (mis. polling),
 # named tunnel dipakai untuk mengekspos HTTP API (/v1/*) ke internet.
 #
-# Prasyarat: .env terisi, `claude login`, cloudflared & (untuk Gemini) node di PATH.
+# Prasyarat: .env terisi, `claude login`, cloudflared & agy di PATH.
 
 param(
     [string]$Tunnel = "rprompt"

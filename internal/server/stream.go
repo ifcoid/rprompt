@@ -111,10 +111,10 @@ func (s *Server) streamChat(ctx context.Context, w http.ResponseWriter, req *cha
 			}
 		}
 	} else if isGeminiModel(req.Model) {
-		if s.gemini == nil {
-			send(chatChunkDelta{Content: "[error] model Gemini tidak diaktifkan (GEMINI_ENABLED=true)"}, nil)
+		if s.agy == nil {
+			send(chatChunkDelta{Content: "[error] model AGY tidak diaktifkan (AGY_ENABLED=true)"}, nil)
 		} else {
-			out, err := s.gemini.Run(ctx, prompt, s.cfg.WorkDir, req.Model)
+			out, err := s.agy.Run(ctx, prompt, s.cfg.WorkDir, req.Model)
 			if err != nil {
 				errDetail = err.Error()
 			} else if out != "" {
