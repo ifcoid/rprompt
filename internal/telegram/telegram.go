@@ -112,7 +112,7 @@ func (c *Client) Send(ctx context.Context, chatID int64, text string) (int64, er
 	var out struct {
 		MessageID int64 `json:"message_id"`
 	}
-	err := c.callJSON(ctx, "sendMessage", map[string]any{
+	err := c.callText(ctx, "sendMessage", map[string]any{
 		"chat_id": chatID,
 		"text":    nonEmpty(text),
 	}, &out)
@@ -122,7 +122,7 @@ func (c *Client) Send(ctx context.Context, chatID int64, text string) (int64, er
 // EditMessageText mengubah teks pesan yang sudah dikirim. Galat "message is not
 // modified" diperlakukan sebagai sukses.
 func (c *Client) EditMessageText(ctx context.Context, chatID, messageID int64, text string) error {
-	err := c.callJSON(ctx, "editMessageText", map[string]any{
+	err := c.callText(ctx, "editMessageText", map[string]any{
 		"chat_id":    chatID,
 		"message_id": messageID,
 		"text":       nonEmpty(text),
@@ -149,7 +149,7 @@ func (c *Client) SendButtons(ctx context.Context, chatID int64, text string, row
 	var out struct {
 		MessageID int64 `json:"message_id"`
 	}
-	err := c.callJSON(ctx, "sendMessage", map[string]any{
+	err := c.callText(ctx, "sendMessage", map[string]any{
 		"chat_id":      chatID,
 		"text":         nonEmpty(text),
 		"reply_markup": inlineKeyboard(rows),
@@ -167,7 +167,7 @@ func (c *Client) AnswerCallbackQuery(ctx context.Context, callbackID, text strin
 
 // EditTextClearButtons mengubah teks pesan sekaligus menghapus keyboard inline.
 func (c *Client) EditTextClearButtons(ctx context.Context, chatID, messageID int64, text string) error {
-	err := c.callJSON(ctx, "editMessageText", map[string]any{
+	err := c.callText(ctx, "editMessageText", map[string]any{
 		"chat_id":      chatID,
 		"message_id":   messageID,
 		"text":         nonEmpty(text),
@@ -358,6 +358,31 @@ func (c *Client) callJSON(ctx context.Context, method string, payload map[string
 	}
 	req.Header.Set("Content-Type", "application/json")
 	return c.do(req, out)
+}
+
+// callText memanggil method yang berisi field "text": teks dikonversi ke HTML
+// (parse_mode=HTML) agar format markdown Claude ter-render rapi di Telegram.
+// Bila Telegram menolak karena entitas HTML tak valid atau teks kepanjangan
+// (markup bisa memperpanjang teks), pesan dikirim ulang sebagai teks polos agar
+// tetap sampai ke pengguna.
+func (c *Client) callText(ctx context.Context, method string, payload map[string]any, out any) error {
+	raw, _ := payload["text"].(string)
+	payload["text"] = mdToHTML(raw)
+	payload["parse_mode"] = "HTML"
+	err := c.callJSON(ctx, method, payload, out)
+	if err != nil && isFormatError(err) {
+		delete(payload, "parse_mode")
+		payload["text"] = raw
+		return c.callJSON(ctx, method, payload, out)
+	}
+	return err
+}
+
+// isFormatError benar bila galat berasal dari parse_mode HTML (entitas tak valid
+// atau pesan terlalu panjang setelah markup) sehingga layak dikirim ulang polos.
+func isFormatError(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "parse entities") || strings.Contains(msg, "too long")
 }
 
 func (c *Client) do(req *http.Request, out any) error {
