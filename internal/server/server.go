@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -298,9 +299,12 @@ func (s *Server) handleCommand(chatID int64, text string) {
 			"Direktori kerja: "+s.chatWorkDir(chatID)+"\nSesi tersimpan: "+state)
 	case "/pwd":
 		_ = s.tg.SendMessage(ctx, chatID, "Direktori kerja saat ini:\n"+s.chatWorkDir(chatID))
+	case "/ls":
+		s.handleLs(ctx, chatID, strings.Join(fields[1:], " "))
 	case "/cd":
 		if len(fields) < 2 {
-			_ = s.tg.SendMessage(ctx, chatID, "Penggunaan: /cd <path-folder>")
+			// Tanpa argumen: kembali ke folder home (WORK_DIR), seperti `cd` di shell.
+			s.handleCd(ctx, chatID, s.cfg.WorkDir)
 			return
 		}
 		s.handleCd(ctx, chatID, strings.Join(fields[1:], " "))
@@ -320,6 +324,11 @@ func (s *Server) handleCommand(chatID int64, text string) {
 // handleCd menetapkan direktori kerja chat ke path bebas (harus folder yang ada).
 func (s *Server) handleCd(ctx context.Context, chatID int64, path string) {
 	path = strings.Trim(path, `"'`)
+	// Path relatif mengacu ke folder kerja chat saat ini (mis. /cd sub, /cd ..),
+	// bukan ke working dir proses. Path absolut dipakai apa adanya.
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(s.chatWorkDir(chatID), path)
+	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		_ = s.tg.SendMessage(ctx, chatID, "Path tidak valid: "+err.Error())
@@ -385,6 +394,39 @@ func (s *Server) handleGet(ctx context.Context, chatID int64, rel string) {
 	if err := s.tg.SendFile(ctx, chatID, absTarget, ""); err != nil {
 		_ = s.tg.SendMessage(ctx, chatID, "Gagal mengirim berkas: "+err.Error())
 	}
+}
+
+// handleLs menampilkan isi folder kerja chat (atau subpath opsional relatif ke
+// folder kerja, mis. /ls uploads). Read-only, tanpa persetujuan tool.
+func (s *Server) handleLs(ctx context.Context, chatID int64, arg string) {
+	dir := s.chatWorkDir(chatID)
+	if arg = strings.Trim(arg, `"'`); arg != "" {
+		if filepath.IsAbs(arg) {
+			dir = arg
+		} else {
+			dir = filepath.Join(dir, arg)
+		}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		_ = s.tg.SendMessage(ctx, chatID, "Gagal membaca folder: "+err.Error())
+		return
+	}
+	var dirs, files []string
+	for _, e := range entries {
+		if e.IsDir() {
+			dirs = append(dirs, "📁 "+e.Name()+"/")
+		} else {
+			files = append(files, "📄 "+e.Name())
+		}
+	}
+	sort.Strings(dirs)
+	sort.Strings(files)
+	body := strings.Join(append(dirs, files...), "\n")
+	if body == "" {
+		body = "(kosong)"
+	}
+	_ = s.tg.SendMessage(ctx, chatID, "Isi "+dir+":\n"+body)
 }
 
 // handleAttachment mengunduh foto/dokumen dari Telegram, menyimpannya ke
@@ -524,7 +566,8 @@ Perintah:
 /continue       - lanjutkan sesi Claude terakhir di folder aktif (mis. dari PC)
 /status         - lihat direktori kerja & status sesi
 /pwd            - lihat direktori kerja saat ini
-/cd <path>      - pindah direktori kerja (path bebas)
+/ls [path]      - lihat isi folder (tanpa arg = folder aktif)
+/cd [path]      - pindah direktori kerja (absolut/relatif; tanpa arg = home)
 /project [nama] - pindah ke proyek terdaftar (tanpa nama = daftar)
 /get <path>     - kirim berkas dari direktori kerja ke chat
 /help           - tampilkan bantuan ini`
