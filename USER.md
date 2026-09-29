@@ -4,7 +4,7 @@ Dokumen ini adalah panduan praktis bagi Anda (pengguna akhir) yang ingin langsun
 
 Aplikasi `rprompt` memungkinkan Anda:
 1. Mengendalikan AI (Claude, AGY, Kiro, Bob) di komputer Anda langsung dari chat Telegram di HP Anda.
-2. Membuka **OpenAI-compatible HTTP API** yang bisa diakses secara publik lewat internet dengan domain dinamis otomatis.
+2. Membuka **OpenAI-compatible HTTP API** yang bisa diakses secara publik lewat internet dengan domain dinamis otomatis, termasuk untuk **model lokal Ollama**.
 
 ---
 
@@ -21,6 +21,10 @@ Sebelum memulai, pastikan Anda telah menginstal program AI bawaan berikut di kom
    - Install: Buka terminal dan jalankan `npm install -g kiro-cli` (atau sesuai petunjuk resminya).
 4. **Bob Shell CLI**:
    - Install: Buka terminal dan jalankan `npm install -g @ibm/bob`
+5. **Ollama** (opsional, tidak butuh NPM; hanya dipakai lewat HTTP API):
+   - Install: unduh dari [ollama.com/download](https://ollama.com/download).
+   - Unduh model, misalnya: `ollama pull qwen3.5:9b`
+   - Pastikan Ollama berjalan (default di `http://localhost:11434`).
 
 ## 2. Unduh Aplikasi Rprompt & Cloudflared
 1. **Rprompt**: Anda tidak perlu menginstal bahasa pemrograman (Go). Cukup unduh *file binary* yang sudah dikompilasi sesuai OS komputer Anda (Windows, Linux, atau macOS) dari repositori `https://github.com/llm-y/download` (di dalam folder `bin/`).
@@ -58,6 +62,15 @@ Agar aplikasi bisa menyambung ke Telegram Anda, setel *Environment Variables* di
 > ```bash
 > export TELEGRAM_BOT_TOKEN="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
 > export ALLOWED_CHAT_IDS="987654321"
+> ```
+
+> **Opsional: aktifkan Ollama.** Tambahkan juga variabel berikut. Setel `OLLAMA_URL` hanya bila Ollama tidak berjalan di `http://localhost:11434`.
+> ```cmd
+> setx OLLAMA_ENABLED "true"
+> ```
+> ```bash
+> export OLLAMA_ENABLED="true"
+> export OLLAMA_URL="http://localhost:11434"
 > ```
 
 ---
@@ -109,6 +122,47 @@ response = c.chat.completions.create(
     model="bob", 
     messages=[{"role": "user", "content": "Halo Bob!"}]
 )
+
+# Chat dengan model lokal Ollama (awali nama model dengan "ollama/")
+response = c.chat.completions.create(
+    model="ollama/qwen3.5:9b",
+    messages=[
+        {"role": "user", "content": "Siapa namamu?"},
+        {"role": "system", "content": "Namamu Budi."},  # urutan bebas, dirapikan otomatis
+    ],
+    reasoning_effort="low",
+)
+print(response.choices[0].message.content)
+
+# Ollama lewat Responses API (/v1/responses)
+r = c.responses.create(
+    model="ollama/gemma4:12b",
+    instructions="Jawab dalam bahasa Indonesia.",
+    input="Jelaskan fotosintesis dalam satu kalimat.",
+    reasoning={"effort": "none"},  # "none" = tanpa thinking, jauh lebih cepat
+)
+print(r.output_text)
 ```
+
+### Tips memakai Ollama
+- **Nama model** diawali `ollama/`, lalu nama model seperti yang tampil di `ollama list`, misalnya `ollama/qwen3.5:9b`. Daftar lengkapnya ada di `GET /v1/models`.
+- **Endpoint**: `/v1/chat/completions` dan `/v1/responses` sama-sama bisa dipakai. `/v1/responses` saat ini hanya untuk model Ollama.
+- **Urutan pesan bebas.** Semua pesan `system`/`developer` (dan `instructions`) otomatis digabung menjadi satu system di awal, dan pesan beruntun dengan role sama digabung. Ini mencegah jawaban rusak pada model yang templatenya ketat soal urutan, misalnya kalau system dikirim setelah user.
+- **Effort** (`reasoning_effort`, `reasoning.effort`) mengatur thinking model:
+
+  | Effort | Hasil di Ollama |
+  |---|---|
+  | (tidak diisi) | mengikuti default model |
+  | `none` | thinking dimatikan: jawaban paling cepat |
+  | `minimal`, `low` | thinking level rendah |
+  | `medium` | thinking level sedang |
+  | `high`, `xhigh` | thinking level tinggi |
+
+  Seberapa besar pengaruh level terhadap panjang thinking tergantung modelnya. Untuk model yang tidak punya fitur thinking, effort diabaikan dan request tidak error.
+- **Isi thinking** dikembalikan terpisah dari jawaban: field `reasoning_content` di chat completions, atau item `reasoning` di Responses API.
+- **Parameter lain** yang diteruskan: `temperature`, `top_p`, dan `max_tokens` (`max_output_tokens` di Responses).
+- **Gambar** (untuk model vision) dikirim sebagai data URL base64 (`data:image/png;base64,...`). URL http belum didukung.
+- **Belum didukung**: tools/function calling, dan `previous_response_id` (API ini stateless, jadi kirim seluruh percakapan setiap kali).
+- **Output panjang di balik Cloudflare**: pakai `stream=True` agar tidak kena timeout 524.
 
 **Selesai!** HP dan aplikasi pihak ketiga (lewat API) Anda kini bisa terhubung secara langsung ke *AI engine* yang ada di laptop/komputer Anda.
