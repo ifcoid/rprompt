@@ -18,10 +18,14 @@ Deploy ke PC ini (mesin dev = mesin produksi):
 ```sh
 go build -o rprompt ./cmd/rprompt
 cp /home/adb/.local/bin/rprompt /home/adb/.local/bin/rprompt.bak   # backup
-cp ./rprompt /home/adb/.local/bin/rprompt
+cp ./rprompt /home/adb/.local/bin/rprompt.new                      # cp langsung gagal "Text file busy"
+mv -f /home/adb/.local/bin/rprompt.new /home/adb/.local/bin/rprompt #   selama service jalan → rename
 sudo systemctl restart rprompt                                    # + cloudflared-rprompt bila perlu
 systemctl status rprompt --no-pager
 ```
+- `./rprompt` tidak masuk `.gitignore`: hapus setelah deploy, jangan ikut di-commit.
+- `sudo` butuh password (tidak bisa dari sesi non-interaktif): minta user menjalankan
+  `! sudo systemctl restart rprompt`.
 - Service berjalan dari `/home/adb/.local/bin/rprompt` (unit: `rprompt.service`,
   tunnel: `cloudflared-rprompt.service`). File unit & `.env` runtime ada di
   `/home/adb/awangga/rprompt/` (folder deployment, terpisah dari repo ini).
