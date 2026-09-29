@@ -33,7 +33,7 @@ Pindah komputer? `git clone` → salin `.env` → `claude login` → jalankan.
 - **File**: kirim foto/dokumen untuk dianalisis, `/get <path>` ambil berkas,
   gambar yang disebut di jawaban dikirim otomatis.
 - **Izin tool via tombol** Telegram (opsional).
-- **HTTP API OpenAI-compatible** dengan 4 engine: **Claude**, **AGY CLI**, **Kiro CLI**, & **Bob Shell**.
+- **HTTP API OpenAI-compatible** dengan 5 engine: **Claude**, **AGY CLI**, **Kiro CLI**, **Bob Shell**, & **Ollama**.
 - Whitelist chat id + secret token; Telegram serial, API paralel.
 
 ## Perintah bot
@@ -56,7 +56,8 @@ Tiap chat punya folder kerja sendiri (default `WORK_DIR`); reset saat restart.
 ## HTTP API (OpenAI-compatible)
 
 Aktifkan: `API_ENABLED=true` + `API_TOKEN` di `.env`. Endpoint di `LISTEN_ADDR`
-(default `:8080`): `POST /v1/chat/completions`, `GET /v1/models`.
+(default `:8080`): `POST /v1/chat/completions`, `POST /v1/responses` (khusus Ollama),
+`GET /v1/models`.
 
 ```python
 from openai import OpenAI
@@ -65,9 +66,20 @@ c.chat.completions.create(model="claude-code",      messages=[...])             
 c.chat.completions.create(model="gemini-2.5-flash", messages=[...], stream=True)  # Gemini, streaming
 c.chat.completions.create(model="kiro",             messages=[...])               # Kiro
 c.chat.completions.create(model="bob",              messages=[...])               # Bob Shell
+c.chat.completions.create(model="ollama/qwen3.5:9b", messages=[...], reasoning_effort="low")  # Ollama
+c.responses.create(model="ollama/gemma4:12b", input=[...], reasoning={"effort": "none"})      # Ollama
 ```
 
-- **Engine via `model`**: "kiro" → Kiro CLI; "bob" atau "bob-shell" → Bob Shell; diawali `gemini` → AGY CLI; selain itu → Claude.
+- **Engine via `model`**: diawali `ollama/` → Ollama; "kiro" → Kiro CLI; "bob" atau "bob-shell" → Bob Shell; diawali `gemini` → AGY CLI; selain itu → Claude.
+- **Ollama** (`OLLAMA_ENABLED=true`, `OLLAMA_URL`): request diterjemahkan ke API native
+  `/api/chat`, bukan diteruskan apa adanya. Semua pesan system/developer digabung
+  menjadi satu system di awal dan role beruntun digabung, sehingga urutan seperti
+  user lalu system aman untuk model dengan template ketat. `reasoning_effort` atau
+  `reasoning.effort` dipetakan ke `think`: `none` → mati, `minimal`/`low`/`medium`/`high`/`xhigh`
+  → level. Untuk model tanpa thinking, effort diabaikan. Thinking dikembalikan sebagai
+  `reasoning_content` (chat) atau item `reasoning` (responses). `temperature`, `top_p`,
+  dan `max_tokens` ikut diteruskan. Gambar hanya berupa data URL base64. Belum
+  mendukung tools dan `previous_response_id`.
 - **Streaming** (`stream:true`): SSE + keepalive — **wajib untuk output panjang di
   balik Cloudflare** (hindari timeout 524 ~100s). `stream:false` balas JSON utuh.
 - **Stateless** (kirim seluruh `messages` tiap call), **paralel** (`API_MAX_CONCURRENT`).

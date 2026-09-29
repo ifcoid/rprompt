@@ -19,6 +19,7 @@ import (
 	"github.com/awangga/rprompt/internal/approval"
 	"github.com/awangga/rprompt/internal/claude"
 	"github.com/awangga/rprompt/internal/config"
+	"github.com/awangga/rprompt/internal/ollama"
 	"github.com/awangga/rprompt/internal/store"
 	"github.com/awangga/rprompt/internal/telegram"
 )
@@ -43,6 +44,7 @@ type Server struct {
 	agy       APIRunner    // engine AGY untuk API (nil bila nonaktif)
 	kiro      APIRunner    // engine Kiro untuk API (nil bila nonaktif)
 	bob       APIRunner    // engine Bob untuk API (nil bila nonaktif)
+	ollama    *ollama.Client // engine Ollama untuk API (nil bila nonaktif)
 	store     *store.Store
 	reg       *approval.Registry // nil bila izin interaktif nonaktif
 
@@ -56,8 +58,8 @@ type Server struct {
 
 // New membangun Server. reg boleh nil bila izin interaktif tidak dipakai.
 // apiRunner dipakai jalur API (sebaiknya tanpa argumen --permission-prompt-tool).
-// gem/kir/bob boleh nil bila AGY/Kiro/Bob tidak diaktifkan.
-func New(cfg *config.Config, tg *telegram.Client, runner, apiRunner promptRunner, gem APIRunner, kir APIRunner, bob APIRunner, st *store.Store, reg *approval.Registry) *Server {
+// gem/kir/bob/oll boleh nil bila AGY/Kiro/Bob/Ollama tidak diaktifkan.
+func New(cfg *config.Config, tg *telegram.Client, runner, apiRunner promptRunner, gem APIRunner, kir APIRunner, bob APIRunner, oll *ollama.Client, st *store.Store, reg *approval.Registry) *Server {
 	var apiSem chan struct{}
 	if cfg.APIMaxConcurrent > 0 {
 		apiSem = make(chan struct{}, cfg.APIMaxConcurrent)
@@ -70,6 +72,7 @@ func New(cfg *config.Config, tg *telegram.Client, runner, apiRunner promptRunner
 		agy:       gem,
 		kiro:      kir,
 		bob:       bob,
+		ollama:    oll,
 		store:     st,
 		reg:       reg,
 		tgSem:     make(chan struct{}, 1),
@@ -125,8 +128,9 @@ func (s *Server) Handler() http.Handler {
 		_, _ = w.Write([]byte("ok"))
 	})
 	if s.cfg.APIEnabled {
-		// API OpenAI-compatible (non-streaming).
+		// API OpenAI-compatible (non-streaming & SSE).
 		mux.HandleFunc("/v1/chat/completions", s.handleChatCompletions)
+		mux.HandleFunc("/v1/responses", s.handleResponses) // khusus Ollama
 		mux.HandleFunc("/v1/models", s.handleModels)
 	}
 	return mux

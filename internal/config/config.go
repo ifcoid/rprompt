@@ -45,6 +45,10 @@ type Config struct {
 	BobBin       string   // path binary bob
 	BobExtraArgs []string // argumen tambahan untuk bob
 
+	// Ollama (opsional): model "ollama/<nama>" di API diteruskan ke /api/chat.
+	OllamaEnabled bool   // aktifkan engine Ollama
+	OllamaURL     string // base URL server Ollama, mis. "http://localhost:11434"
+
 	// Izin interaktif via tombol Telegram.
 	Interactive     bool          // aktifkan persetujuan izin tool via Telegram
 	MCPAddr         string        // alamat listen lokal server MCP, mis. "127.0.0.1:8765"
@@ -144,6 +148,9 @@ func Load() (*Config, error) {
 	if b := strings.TrimSpace(os.Getenv("BOB_EXTRA_ARGS")); b != "" {
 		c.BobExtraArgs = strings.Fields(b)
 	}
+
+	c.OllamaEnabled = getenvBool("OLLAMA_ENABLED", false)
+	c.OllamaURL = getenv("OLLAMA_URL", "http://localhost:11434")
 
 	secs := getenv("CLAUDE_TIMEOUT_SECONDS", "600")
 	n, err := strconv.Atoi(secs)

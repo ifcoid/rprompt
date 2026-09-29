@@ -31,6 +31,7 @@ import (
 	"github.com/awangga/rprompt/internal/agy"
 	"github.com/awangga/rprompt/internal/kiro"
 	"github.com/awangga/rprompt/internal/mcpserver"
+	"github.com/awangga/rprompt/internal/ollama"
 	"github.com/awangga/rprompt/internal/server"
 	"github.com/awangga/rprompt/internal/store"
 	"github.com/awangga/rprompt/internal/telegram"
@@ -137,7 +138,14 @@ func main() {
 		log.Printf("engine Bob AKTIF (bin %q)", cfg.BobBin)
 	}
 
-	srv := server.New(cfg, tg, runner, &apiRunner, gem, kir, bRunner, st, reg)
+	// Engine Ollama opsional untuk API (model "ollama/<nama>").
+	var oll *ollama.Client
+	if cfg.OllamaEnabled {
+		oll = ollama.New(cfg.OllamaURL)
+		log.Printf("engine Ollama AKTIF (%s)", oll.BaseURL)
+	}
+
+	srv := server.New(cfg, tg, runner, &apiRunner, gem, kir, bRunner, oll, st, reg)
 
 	httpSrv := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	httpLn := mustListen(cfg.ListenAddr, "server HTTP")
@@ -326,7 +334,7 @@ func printReady(cfg *config.Config) {
 	}
 	api := "nonaktif (set API_ENABLED=true bila perlu)"
 	if cfg.APIEnabled {
-		api = "aktif di " + cfg.ListenAddr + " (POST /v1/chat/completions)\n"
+		api = "aktif di " + cfg.ListenAddr + " (POST /v1/chat/completions, /v1/responses)\n"
 		source := "(dari os env)"
 		if strings.HasPrefix(cfg.APIToken, "rprompt-sec-") {
 			source = "(auto-generated)"

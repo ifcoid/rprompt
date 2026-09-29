@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/awangga/rprompt/internal/claude"
+	"github.com/awangga/rprompt/internal/ollama"
 )
 
 // --- Tipe chunk streaming ala OpenAI (chat.completion.chunk) ---
@@ -31,14 +32,16 @@ type chatChunkChoice struct {
 }
 
 type chatChunkDelta struct {
-	Role    string `json:"role,omitempty"`
-	Content string `json:"content,omitempty"`
+	Role             string `json:"role,omitempty"`
+	Content          string `json:"content,omitempty"`
+	ReasoningContent string `json:"reasoning_content,omitempty"` // thinking (Ollama)
 }
 
 // streamChat membalas /v1/chat/completions dalam format SSE OpenAI (stream=true).
 // Output dikirim bertahap dan disisipi keepalive comment agar koneksi tetap
 // aktif — mencegah timeout 524 Cloudflare (~100s) pada output yang panjang.
-func (s *Server) streamChat(ctx context.Context, w http.ResponseWriter, req *chatCompletionRequest, prompt string) {
+// oreq diisi (prompt kosong) bila model diarahkan ke Ollama.
+func (s *Server) streamChat(ctx context.Context, w http.ResponseWriter, req *chatCompletionRequest, prompt string, oreq *ollama.ChatRequest) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeOpenAIError(w, http.StatusInternalServerError, "server tidak mendukung streaming", "api_error")
@@ -99,7 +102,17 @@ func (s *Server) streamChat(ctx context.Context, w http.ResponseWriter, req *cha
 	}()
 
 	var errDetail string // pesan error asli engine (mis. rate limit) bila ada
-	if req.Model == "kiro" {
+	finish := "stop"
+	if oreq != nil {
+		res, err := s.ollama.Chat(ctx, *oreq, func(content, thinking string) {
+			send(chatChunkDelta{Content: content, ReasoningContent: thinking}, nil)
+		})
+		if err != nil {
+			errDetail = "Ollama error: " + err.Error()
+		} else {
+			finish = finishReason(res.DoneReason)
+		}
+	} else if req.Model == "kiro" {
 		if s.kiro == nil {
 			send(chatChunkDelta{Content: "[error] model Kiro tidak diaktifkan (KIRO_ENABLED=true)"}, nil)
 		} else {
@@ -168,7 +181,6 @@ func (s *Server) streamChat(ctx context.Context, w http.ResponseWriter, req *cha
 		flusher.Flush()
 		mu.Unlock()
 	} else {
-		finish := "stop"
 		send(chatChunkDelta{}, &finish)
 	}
 	raw("data: [DONE]\n\n")

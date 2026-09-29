@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/awangga/rprompt/internal/ollama"
 )
 
 // apiModelName adalah nama model yang diiklankan endpoint OpenAI-compatible.
@@ -27,7 +29,18 @@ type chatCompletionRequest struct {
 	Model    string        `json:"model"`
 	Messages []chatMessage `json:"messages"`
 	Stream   bool          `json:"stream"`
+
+	// Hanya dipakai engine Ollama; engine CLI mengabaikannya.
+	ReasoningEffort     string          `json:"reasoning_effort"`
+	Reasoning           *reasoningParam `json:"reasoning"`
+	Temperature         *float64        `json:"temperature"`
+	TopP                *float64        `json:"top_p"`
+	MaxTokens           *int            `json:"max_tokens"`
+	MaxCompletionTokens *int            `json:"max_completion_tokens"`
 }
+
+// apiMaxBody membatasi ukuran body request API (gambar base64 ikut dihitung).
+const apiMaxBody = 32 << 20
 
 type chatCompletionResponse struct {
 	ID      string       `json:"id"`
@@ -45,8 +58,9 @@ type chatChoice struct {
 }
 
 type chatRespMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role             string `json:"role"`
+	Content          string `json:"content"`
+	ReasoningContent string `json:"reasoning_content,omitempty"` // thinking (Ollama)
 }
 
 type chatUsage struct {
@@ -71,26 +85,39 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req chatCompletionRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20)).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, apiMaxBody)).Decode(&req); err != nil {
 		writeOpenAIError(w, http.StatusBadRequest, "JSON tidak valid", "invalid_request_error")
 		return
 	}
-	prompt := buildPrompt(req.Messages)
-	if prompt == "" {
-		writeOpenAIError(w, http.StatusBadRequest, "'messages' kosong atau tanpa teks", "invalid_request_error")
-		return
-	}
 
-	// Paralel (tidak diantrikan): bila batas konkurensi penuh, tolak segera.
-	if s.apiSem != nil {
-		select {
-		case s.apiSem <- struct{}{}:
-			defer func() { <-s.apiSem }()
-		default:
-			writeOpenAIError(w, http.StatusTooManyRequests, "kapasitas penuh, coba lagi", "rate_limit_error")
+	// Ollama menerima messages terstruktur (dirapikan), engine lain satu prompt rata.
+	var prompt string
+	var oreq *ollama.ChatRequest
+	if isOllamaModel(req.Model) {
+		if s.ollama == nil {
+			writeOpenAIError(w, http.StatusBadRequest,
+				"model Ollama tidak diaktifkan (set OLLAMA_ENABLED=true)", "invalid_request_error")
+			return
+		}
+		o, err := chatToOllama(&req)
+		if err != nil {
+			writeOpenAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error")
+			return
+		}
+		oreq = &o
+	} else {
+		prompt = buildPrompt(req.Messages)
+		if prompt == "" {
+			writeOpenAIError(w, http.StatusBadRequest, "'messages' kosong atau tanpa teks", "invalid_request_error")
 			return
 		}
 	}
+
+	release, ok := s.acquireAPI(w)
+	if !ok {
+		return
+	}
+	defer release()
 
 	ctx, cancel := context.WithTimeout(r.Context(), s.cfg.Timeout)
 	defer cancel()
@@ -98,14 +125,30 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	// stream=true: balas SSE bertahap (hindari timeout 524 Cloudflare untuk
 	// output panjang). stream=false: balas JSON utuh seperti biasa.
 	if req.Stream {
-		s.streamChat(ctx, w, &req, prompt)
+		s.streamChat(ctx, w, &req, prompt, oreq)
 		return
 	}
 
-	// Pilih engine berdasarkan field "model": "gemini..." -> AGY, "kiro" -> Kiro CLI, selain itu
-	// -> Claude. Keduanya stateless & memakai direktori kerja default.
-	var text string
-	if req.Model == "kiro" {
+	// Pilih engine berdasarkan field "model": "ollama/..." -> Ollama, "gemini..." -> AGY,
+	// "kiro" -> Kiro CLI, selain itu -> Claude. Semuanya stateless.
+	var text, reasoning string
+	var usage chatUsage // hanya Ollama yang melaporkan token
+	finish := "stop"
+	if oreq != nil {
+		res, err := s.ollama.Chat(ctx, *oreq, nil)
+		if err != nil {
+			log.Printf("openai api ollama error: %v", err)
+			writeOllamaError(w, err)
+			return
+		}
+		text, reasoning = res.Content, res.Thinking
+		usage = chatUsage{
+			PromptTokens:     res.PromptTokens,
+			CompletionTokens: res.CompletionTokens,
+			TotalTokens:      res.PromptTokens + res.CompletionTokens,
+		}
+		finish = finishReason(res.DoneReason)
+	} else if req.Model == "kiro" {
 		if s.kiro == nil {
 			writeOpenAIError(w, http.StatusBadRequest,
 				"model Kiro tidak diaktifkan (set KIRO_ENABLED=true)", "invalid_request_error")
@@ -173,11 +216,26 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		Model:   model,
 		Choices: []chatChoice{{
 			Index:        0,
-			Message:      chatRespMessage{Role: "assistant", Content: text},
-			FinishReason: "stop",
+			Message:      chatRespMessage{Role: "assistant", Content: text, ReasoningContent: reasoning},
+			FinishReason: finish,
 		}},
-		Usage: chatUsage{}, // token tidak dilacak (mengikuti claude CLI)
+		Usage: usage,
 	})
+}
+
+// acquireAPI mengambil slot konkurensi API. Paralel (tidak diantrikan): bila
+// batas penuh, balas 429 dan kembalikan ok=false.
+func (s *Server) acquireAPI(w http.ResponseWriter) (release func(), ok bool) {
+	if s.apiSem == nil {
+		return func() {}, true
+	}
+	select {
+	case s.apiSem <- struct{}{}:
+		return func() { <-s.apiSem }, true
+	default:
+		writeOpenAIError(w, http.StatusTooManyRequests, "kapasitas penuh, coba lagi", "rate_limit_error")
+		return nil, false
+	}
 }
 
 // handleModels mengimplementasikan GET /v1/models (sebagian klien memerlukannya).
@@ -207,6 +265,19 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.bob != nil {
 		data = add(data, "ibm", "bob", "bob-shell")
+	}
+	if s.ollama != nil {
+		// Ollama: model lokal (/api/tags) dengan prefix "ollama/".
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		names, err := s.ollama.Models(ctx)
+		cancel()
+		if err != nil {
+			log.Printf("daftar model Ollama gagal: %v", err)
+		}
+		for i := range names {
+			names[i] = ollamaPrefix + names[i]
+		}
+		data = add(data, "ollama", names...)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
 }
