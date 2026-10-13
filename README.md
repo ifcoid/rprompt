@@ -1,16 +1,75 @@
 # rprompt
 
-Remote prompt **Telegram ↔ Claude Code**. Kirim prompt dari HP via Telegram,
-dijalankan `claude -p` di laptop, hasilnya balik ke chat — laptop bisa ditinggal.
+Remote AI Prompt Runner (**Telegram ↔ AI Engine & HTTP API**). 
+Kirim prompt dari HP via Telegram atau akses melalui **OpenAI-compatible HTTP API** untuk menjalankan AI CLI langsung di komputer/laptop Anda:
+- **Claude Code CLI** (`claude -p`)
+- **Google Antigravity CLI / AGY** (model `gemini-*`)
+- **Kiro CLI** (model `kiro`)
+- **Bob Shell CLI** (model `bob`)
 
-Bonus: **HTTP API OpenAI-compatible** (Claude + Gemini) untuk dipakai aplikasi lain.
+---
+
+## Prasyarat (Prerequisites)
+
+Sebelum menjalankan **rprompt**, pastikan perangkat/laptop Anda telah memenuhi prasyarat berikut sesuai fitur yang ingin digunakan:
+
+### 1. Komponen Dasar (Core & Tooling)
+
+- **[Git](https://git-scm.com/)**: Untuk mengkloning repositori ini.
+- **[Go](https://go.dev/dl/)** (v1.26+): Diperlukan jika ingin mengompilasi binary sendiri dari *source code*. *(Jika mengunduh file binary siap pakai dari rilis/CI, Go tidak wajib diinstal)*.
+- **[Node.js](https://nodejs.org/) & npm** (v18+ LTS disarankan): Diperlukan untuk instalasi Claude Code, Kiro, atau Bob Shell CLI.
+- **Akun & Bot Telegram** *(Wajib jika memakai Bot Telegram)*:
+  - **Bot Token**: Buat bot melalui [@BotFather](https://t.me/BotFather) (`/newbot`) untuk mendapatkan token API.
+  - **Chat ID**: Dapatkan ID akun Telegram Anda melalui [@userinfobot](https://t.me/userinfobot) untuk whitelist keamanan (`ALLOWED_CHAT_IDS`).
+
+### 2. Engine AI (Instal sesuai engine yang ingin Anda jalankan)
+
+Anda dapat menginstal salah satu atau semua engine berikut:
+
+- **[Google Antigravity CLI (`agy`)](https://antigravity.google)** *(Untuk engine Gemini / AGY di API)*:
+  - Instalasi Windows (PowerShell):
+    ```powershell
+    irm https://antigravity.google/cli/install.ps1 | iex
+    ```
+  - Instalasi Linux/macOS:
+    ```sh
+    curl -fsSL https://antigravity.google/cli/install.sh | bash
+    ```
+  - Login & verifikasi:
+    Jalankan perintah `agy` di terminal untuk autentikasi awal (ikuti petunjuk di layar saat pertama kali dijalankan):
+    ```sh
+    agy
+    ```
+    *Pastikan perintah `agy` sudah dikenali di terminal/PATH.*
+  - **Multi-Akun (Rotasi 5 Akun)** *(Opsional)*:
+    Jalankan script `setup-5-accounts.bat` untuk login ke 5 akun Google berbeda, lalu atur `AGY_BIN=agy-rotator.bat` di `.env` agar kuota/rate-limit terbagi rata secara otomatis.
+
+- **[Claude Code CLI](https://code.claude.com)** *(Untuk bot Telegram & model Claude di API)*:
+  - Instalasi:
+    ```sh
+    npm install -g @anthropic-ai/claude-code
+    ```
+  - Login & verifikasi:
+    ```sh
+    claude login
+    ```
+    *Pastikan perintah `claude` sudah dikenali di terminal/PATH.*
+
+- **[Kiro CLI](https://github.com/)** *(Untuk model Kiro di API)*:
+  - Instalasi: `npm install -g kiro-cli`
+
+- **[Bob Shell CLI](https://github.com/IBM/bob)** *(Untuk model Bob di API)*:
+  - Instalasi: `npm install -g @ibm/bob`
+
+### 3. Jaringan & Ekspos Publik (Opsional)
+
+- **[Cloudflare Tunnel (`cloudflared`)](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)**:
+  - Diperlukan jika mengaktifkan mode webhook (`TELEGRAM_MODE=webhook`), quick tunnel otomatis (`AUTO_TUNNEL=true`), atau named tunnel (`CLOUDFLARED_TUNNEL`) agar bot atau API dapat diakses publik dari luar jaringan lokal.
 
 ## Quick Start (portabel)
 
 Mode `polling` (default): bot menarik update sendiri — **tanpa webhook, tunnel,
 atau service**. Jalan di balik NAT.
-
-Prasyarat: [Go](https://go.dev/dl/) 1.26+, [Claude Code CLI](https://code.claude.com) (sudah `claude login`).
 
 ```sh
 git clone https://github.com/ifcoid/rprompt.git && cd rprompt
@@ -71,7 +130,7 @@ c.chat.completions.create(model="bob",              messages=[...])             
 - **Streaming** (`stream:true`): SSE + keepalive — **wajib untuk output panjang di
   balik Cloudflare** (hindari timeout 524 ~100s). `stream:false` balas JSON utuh.
 - **Stateless** (kirim seluruh `messages` tiap call), **paralel** (`API_MAX_CONCURRENT`).
-- **AGY**: `irm https://antigravity.google/cli/install.ps1 | iex` lalu `agy login` → `AGY_ENABLED=true`.
+- **AGY**: `irm https://antigravity.google/cli/install.ps1 | iex` lalu jalankan `agy` untuk autentikasi → `AGY_ENABLED=true`.
 - **Kiro**: `npm i -g kiro-cli` → `KIRO_ENABLED=true`.
 - **Bob Shell**: `npm i -g @ibm/bob` → `BOB_ENABLED=true`.
 

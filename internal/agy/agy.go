@@ -118,8 +118,8 @@ func isTransient(err error) bool {
 func (r *Runner) runOnce(ctx context.Context, prompt, workDir, model string) (string, error) {
 	args := []string{"--output-format", "json"}
 	args = append(args, r.ExtraArgs...)
-	if m := strings.TrimSpace(model); m != "" && !strings.EqualFold(m, "gemini") {
-		args = append(args, "-m", m)
+	if m := mapModel(model); m != "" {
+		args = append(args, "--model", m)
 	}
 
 	cmd := r.command(ctx, args)
@@ -157,4 +157,21 @@ func (r *Runner) runOnce(ctx context.Context, prompt, workDir, model string) (st
 		return "", fmt.Errorf("agy gagal: %s", msg)
 	}
 	return strings.TrimSpace(stdout.String()), nil
+}
+
+// mapModel memetakan request model OpenAI ke model ID resmi yang dikenali AGY CLI.
+func mapModel(model string) string {
+	m := strings.ToLower(strings.TrimSpace(model))
+	switch {
+	case m == "" || m == "gemini":
+		return "" // pakai model default bawaan agy
+	case m == "gemini-2.5-flash" || m == "gemini-flash" || m == "gemini-3.8-flash":
+		return "gemini-3.8-flash-medium"
+	case m == "gemini-2.5-flash-lite" || m == "gemini-flash-low":
+		return "gemini-3.8-flash-low"
+	case m == "gemini-2.5-pro" || m == "gemini-pro" || m == "gemini-flash-high" || m == "gemini-3-pro-preview":
+		return "gemini-3.8-flash-high"
+	default:
+		return strings.TrimSpace(model)
+	}
 }

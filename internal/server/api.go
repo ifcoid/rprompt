@@ -105,7 +105,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	// Pilih engine berdasarkan field "model": "gemini..." -> AGY, "kiro" -> Kiro CLI, selain itu
 	// -> Claude. Keduanya stateless & memakai direktori kerja default.
 	var text string
-	if req.Model == "kiro" {
+	if isKiroModel(req.Model) {
 		if s.kiro == nil {
 			writeOpenAIError(w, http.StatusBadRequest,
 				"model Kiro tidak diaktifkan (set KIRO_ENABLED=true)", "invalid_request_error")
@@ -222,6 +222,11 @@ func isGeminiModel(model string) bool {
 func isBobModel(model string) bool {
 	m := strings.ToLower(strings.TrimSpace(model))
 	return strings.HasPrefix(m, "bob")
+}
+
+// isKiroModel mengembalikan true bila nama model menunjuk ke engine Kiro.
+func isKiroModel(model string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "kiro")
 }
 
 // claudeModelOverride memetakan field "model" OpenAI ke argumen --model claude.

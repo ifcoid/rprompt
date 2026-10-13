@@ -99,7 +99,7 @@ func (s *Server) streamChat(ctx context.Context, w http.ResponseWriter, req *cha
 	}()
 
 	var errDetail string // pesan error asli engine (mis. rate limit) bila ada
-	if req.Model == "kiro" {
+	if isKiroModel(req.Model) {
 		if s.kiro == nil {
 			send(chatChunkDelta{Content: "[error] model Kiro tidak diaktifkan (KIRO_ENABLED=true)"}, nil)
 		} else {

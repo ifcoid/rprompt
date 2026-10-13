@@ -49,9 +49,13 @@ func (r *Runner) Run(ctx context.Context, prompt, workDir, model string) (string
 	args := []string{"chat", "--no-interactive"}
 	args = append(args, r.ExtraArgs...)
 
-	// Opsional: Jika kiro menerima flag --model, kita bisa meneruskannya
+	// Jika model spesifik ditentukan (mis. kiro-claude-3-5-sonnet atau claude-3-5-sonnet), teruskan via --model
 	if m := strings.TrimSpace(model); m != "" && !strings.EqualFold(m, "kiro") {
-		args = append(args, "--model", m)
+		m = strings.TrimPrefix(m, "kiro-")
+		m = strings.TrimPrefix(m, "kiro/")
+		if m != "" {
+			args = append(args, "--model", m)
+		}
 	}
 
 	cmd := r.command(ctx, args)
