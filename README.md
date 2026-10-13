@@ -126,12 +126,16 @@ c.chat.completions.create(model="kiro",             messages=[...])             
 c.chat.completions.create(model="bob",              messages=[...])               # Bob Shell
 ```
 
-- **Engine via `model`**: "kiro" → Kiro CLI; "bob" atau "bob-shell" → Bob Shell; diawali `gemini` → AGY CLI; selain itu → Claude.
+- **Engine via `model`**:
+  - Claude: `claude-code`, `opus`, `sonnet`, `haiku`, dll.
+  - AGY CLI: Diawali `gemini` (mis. `gemini-2.5-flash`, `gemini-3.8-flash-high`, `gemini-pro`).
+  - Kiro CLI: `kiro` (default auto), atau model spesifik realtime seperti `kiro-claude-sonnet-4.5`, `kiro-claude-haiku-4.5`, `kiro-deepseek-3.2`, `kiro-minimax-m2.5`, `kiro-glm-5`, `kiro-qwen3-coder-next` (bisa juga langsung `deepseek-3.2` atau alias `kiro-sonnet`, `kiro-haiku`). Daftar model realtime dapat dilihat di `GET /v1/models`.
+  - Bob Shell: "bob" atau "bob-shell".
 - **Streaming** (`stream:true`): SSE + keepalive — **wajib untuk output panjang di
   balik Cloudflare** (hindari timeout 524 ~100s). `stream:false` balas JSON utuh.
 - **Stateless** (kirim seluruh `messages` tiap call), **paralel** (`API_MAX_CONCURRENT`).
 - **AGY**: `irm https://antigravity.google/cli/install.ps1 | iex` lalu jalankan `agy` untuk autentikasi → `AGY_ENABLED=true`.
-- **Kiro**: `npm i -g kiro-cli` → `KIRO_ENABLED=true`.
+- **Kiro**: `npm i -g kiro-cli` → `KIRO_ENABLED=true`. Model dideteksi otomatis secara realtime via `kiro-cli chat --list-models`.
 - **Bob Shell**: `npm i -g @ibm/bob` → `BOB_ENABLED=true`.
 
 ## Ekspos ke internet

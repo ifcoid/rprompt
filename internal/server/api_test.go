@@ -61,6 +61,28 @@ func (g *fakeAgy) Run(_ context.Context, prompt, _, model string) (string, error
 	return g.out, g.err
 }
 
+// fakeKiro mengimplementasikan APIRunner dan ListModels.
+type fakeKiro struct {
+	out       string
+	err       error
+	gotPrompt string
+	gotModel  string
+	models    []string
+}
+
+func (k *fakeKiro) Run(_ context.Context, prompt, _, model string) (string, error) {
+	k.gotPrompt = prompt
+	k.gotModel = model
+	return k.out, k.err
+}
+
+func (k *fakeKiro) ListModels(_ context.Context) []string {
+	if len(k.models) > 0 {
+		return k.models
+	}
+	return []string{"claude-sonnet-4.5", "deepseek-3.2", "qwen3-coder-next"}
+}
+
 func newAPITestServer(runner promptRunner) *Server {
 	return &Server{
 		cfg:       &config.Config{APIEnabled: true, APIToken: "rahasia", WorkDir: "/wd", Timeout: 5 * time.Second},
@@ -300,6 +322,50 @@ func TestModels(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), apiModelName) {
 		t.Errorf("daftar model harus memuat %q: %s", apiModelName, rr.Body.String())
+	}
+}
+
+func TestChatKiroRouting(t *testing.T) {
+	claudeR := &fakeRunner{result: claude.Result{Text: "dari claude"}}
+	kir := &fakeKiro{out: "dari kiro"}
+	s := newAPITestServer(claudeR)
+	s.kiro = kir
+
+	for _, modelName := range []string{"kiro", "kiro-claude-sonnet-4.5", "deepseek-3.2", "qwen3-coder-next"} {
+		body := `{"model":"` + modelName + `","messages":[{"role":"user","content":"halo"}]}`
+		rr := doChat(s, http.MethodPost, "Bearer rahasia", body)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("model %s harus 200, dapat %d (%s)", modelName, rr.Code, rr.Body.String())
+		}
+		var resp chatCompletionResponse
+		_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+		if resp.Choices[0].Message.Content != "dari kiro" {
+			t.Errorf("harus dijawab Kiro, dapat %q", resp.Choices[0].Message.Content)
+		}
+		if kir.gotModel != modelName {
+			t.Errorf("Kiro menerima model %q, mau %q", kir.gotModel, modelName)
+		}
+	}
+	if claudeR.gotPrompt != "" {
+		t.Errorf("Claude tidak boleh dipanggil untuk model Kiro")
+	}
+}
+
+func TestModelsWithKiro(t *testing.T) {
+	s := newAPITestServer(&fakeRunner{})
+	s.kiro = &fakeKiro{models: []string{"claude-sonnet-4.5", "deepseek-3.2"}}
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	req.Header.Set("Authorization", "Bearer rahasia")
+	rr := httptest.NewRecorder()
+	s.handleModels(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("harus 200, dapat %d", rr.Code)
+	}
+	body := rr.Body.String()
+	for _, expected := range []string{"kiro", "kiro-claude-sonnet-4.5", "deepseek-3.2"} {
+		if !strings.Contains(body, expected) {
+			t.Errorf("daftar model Kiro harus memuat %q: %s", expected, body)
+		}
 	}
 }
 

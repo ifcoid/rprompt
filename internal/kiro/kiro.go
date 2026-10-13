@@ -3,11 +3,14 @@ package kiro
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
+	"time"
 )
 
 var (
@@ -15,12 +18,28 @@ var (
 	ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 	// footerRegex digunakan untuk membuang baris footer "▸ Credits: ... Time: ...".
 	footerRegex = regexp.MustCompile(`▸\s*Credits:.*`)
+
+	// DefaultModels adalah daftar model resmi Kiro CLI bila deteksi realtime gagal.
+	DefaultModels = []string{
+		"auto",
+		"claude-sonnet-4.5",
+		"claude-sonnet-4",
+		"claude-haiku-4.5",
+		"deepseek-3.2",
+		"minimax-m2.5",
+		"minimax-m2.1",
+		"glm-5",
+		"qwen3-coder-next",
+	}
 )
 
 // Runner mengeksekusi binary kiro-cli.
 type Runner struct {
-	Bin       string
-	ExtraArgs []string
+	Bin         string
+	ExtraArgs   []string
+	modelsCache []string
+	cacheTime   time.Time
+	cacheMu     sync.Mutex
 }
 
 // New membuat Runner.
@@ -42,6 +61,85 @@ func (r *Runner) command(ctx context.Context, args []string) *exec.Cmd {
 	return exec.CommandContext(ctx, bin, args...)
 }
 
+// ListModels mengambil daftar model yang didukung Kiro CLI secara realtime dengan cache TTL 5 menit.
+func (r *Runner) ListModels(ctx context.Context) []string {
+	r.cacheMu.Lock()
+	if len(r.modelsCache) > 0 && time.Since(r.cacheTime) < 5*time.Minute {
+		cached := append([]string(nil), r.modelsCache...)
+		r.cacheMu.Unlock()
+		return cached
+	}
+	r.cacheMu.Unlock()
+
+	// Cek realtime via: kiro-cli chat --list-models --format json
+	cmdCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
+	defer cancel()
+
+	cmd := r.command(cmdCtx, []string{"chat", "--list-models", "--format", "json"})
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err == nil {
+		var resp struct {
+			Models []struct {
+				ModelID   string `json:"model_id"`
+				ModelName string `json:"model_name"`
+			} `json:"models"`
+		}
+		if err := json.Unmarshal(stdout.Bytes(), &resp); err == nil && len(resp.Models) > 0 {
+			var ids []string
+			for _, m := range resp.Models {
+				id := strings.TrimSpace(m.ModelID)
+				if id == "" {
+					id = strings.TrimSpace(m.ModelName)
+				}
+				if id != "" {
+					ids = append(ids, id)
+				}
+			}
+			if len(ids) > 0 {
+				r.cacheMu.Lock()
+				r.modelsCache = ids
+				r.cacheTime = time.Now()
+				r.cacheMu.Unlock()
+				return ids
+			}
+		}
+	}
+
+	return DefaultModels
+}
+
+// MapModel memetakan request model OpenAI ke model ID resmi yang dikenali Kiro CLI.
+func MapModel(model string) string {
+	m := strings.ToLower(strings.TrimSpace(model))
+	switch {
+	case m == "" || m == "kiro" || m == "kiro-auto" || m == "kiro/auto" || m == "auto":
+		return "" // default bawaan kiro
+	}
+
+	m = strings.TrimPrefix(m, "kiro-")
+	m = strings.TrimPrefix(m, "kiro/")
+
+	switch m {
+	case "sonnet", "claude-sonnet", "sonnet-4.5", "claude-3-5-sonnet":
+		return "claude-sonnet-4.5"
+	case "sonnet-4":
+		return "claude-sonnet-4"
+	case "haiku", "claude-haiku", "haiku-4.5":
+		return "claude-haiku-4.5"
+	case "deepseek", "deepseek-v3", "deepseek-chat":
+		return "deepseek-3.2"
+	case "minimax":
+		return "minimax-m2.5"
+	case "glm":
+		return "glm-5"
+	case "qwen", "qwen-coder":
+		return "qwen3-coder-next"
+	default:
+		return m
+	}
+}
+
 // Run menjalankan prompt dan mengembalikan teks jawaban bersih tanpa ANSI.
 func (r *Runner) Run(ctx context.Context, prompt, workDir, model string) (string, error) {
 	// kiro-cli chat --no-interactive
@@ -49,13 +147,9 @@ func (r *Runner) Run(ctx context.Context, prompt, workDir, model string) (string
 	args := []string{"chat", "--no-interactive"}
 	args = append(args, r.ExtraArgs...)
 
-	// Jika model spesifik ditentukan (mis. kiro-claude-3-5-sonnet atau claude-3-5-sonnet), teruskan via --model
-	if m := strings.TrimSpace(model); m != "" && !strings.EqualFold(m, "kiro") {
-		m = strings.TrimPrefix(m, "kiro-")
-		m = strings.TrimPrefix(m, "kiro/")
-		if m != "" {
-			args = append(args, "--model", m)
-		}
+	// Pemetaan model realtime untuk Kiro CLI
+	if targetModel := MapModel(model); targetModel != "" {
+		args = append(args, "--model", targetModel)
 	}
 
 	cmd := r.command(ctx, args)

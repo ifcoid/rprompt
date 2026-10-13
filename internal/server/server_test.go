@@ -58,3 +58,25 @@ func TestIsGeminiModel(t *testing.T) {
 		}
 	}
 }
+
+func TestIsKiroModel(t *testing.T) {
+	cases := map[string]bool{
+		"kiro":                   true,
+		"kiro-auto":              true,
+		"kiro-claude-sonnet-4.5": true,
+		"deepseek-3.2":           true,
+		"minimax-m2.5":           true,
+		"glm-5":                  true,
+		"qwen3-coder-next":       true,
+		"gemini-2.5-flash":       false,
+		"claude-code":            false,
+		"gpt-4o":                 false,
+		"":                       false,
+	}
+	for model, want := range cases {
+		if got := isKiroModel(model); got != want {
+			t.Errorf("isKiroModel(%q)=%v, mau %v", model, got, want)
+		}
+	}
+}
+
