@@ -35,10 +35,10 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26.x' # Updated to match go.mod
+          go-version: '1.27.x' # Syarat garble di bawah; naikkan keduanya bersamaan
 
       - name: Install Garble (Obfuscator)
-        run: go install mvdan.cc/garble@latest
+        run: go install mvdan.cc/garble@v0.18.0
 
       - name: Build Binary (Obfuscated)
         env:
