@@ -24,6 +24,7 @@ func TestParse(t *testing.T) {
 		"penutup di dalam argumen": {"<use_tool name=\"write\">\n{\"content\":\"x</use_tool>\\n<use_tool name=\\\"read\\\">\"}\n</use_tool>",
 			want{"", []string{`write {"content":"x</use_tool>\n<use_tool name=\"read\">"}`}}},
 		"json rusak diteruskan mentah": {"<use_tool name=\"read\">\n{path: a}\n</use_tool>", want{"", []string{"read {path: a}"}}},
+		"hasil karangan":               {"Baca.\n<tool_result name=\"read\">\nx\n</tool_result>", want{"Baca.", nil}},
 		"tanpa argumen":                {"<use_tool name=\"read\">\n</use_tool>", want{"", []string{"read {}"}}},
 		"penutup hilang":               {"<use_tool name=\"read\">\n{\"path\":\"a\"}", want{"", []string{`read {"path":"a"}`}}},
 		"terpotong":                    {"x\n<use_tool name=\"read\">\n{\"path\":\"a", want{"x\n<use_tool name=\"read\">\n{\"path\":\"a", nil}},

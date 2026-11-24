@@ -188,6 +188,9 @@ func Parse(text string, tools []Tool) (string, []Call) {
 				fence = ""
 			}
 		} else if fence == "" {
+			if strings.HasPrefix(strings.TrimLeft(line, " \t"), "<tool_result") {
+				return strings.TrimSpace(text[:pos]), nil // karangan model
+			}
 			if c, n, ok := parseOne(text[pos:], known); ok {
 				calls := []Call{c}
 				rest := text[pos+n:]
