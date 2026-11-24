@@ -112,7 +112,7 @@ func (s *Server) streamChat(ctx context.Context, w http.ResponseWriter, req *cha
 		} else {
 			finish = finishReason(res.DoneReason)
 		}
-	} else if req.Model == "kiro" {
+	} else if isKiroModel(req.Model) {
 		if s.kiro == nil {
 			send(chatChunkDelta{Content: "[error] model Kiro tidak diaktifkan (KIRO_ENABLED=true)"}, nil)
 		} else {

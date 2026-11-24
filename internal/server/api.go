@@ -148,7 +148,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			TotalTokens:      res.PromptTokens + res.CompletionTokens,
 		}
 		finish = finishReason(res.DoneReason)
-	} else if req.Model == "kiro" {
+	} else if isKiroModel(req.Model) {
 		if s.kiro == nil {
 			writeOpenAIError(w, http.StatusBadRequest,
 				"model Kiro tidak diaktifkan (set KIRO_ENABLED=true)", "invalid_request_error")
@@ -258,10 +258,25 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	if s.agy != nil {
 		// AGY: nama yang diteruskan ke `agy -m` (apa pun gemini-* valid).
 		data = add(data, "google",
-			"gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-3-pro-preview")
+			"gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-3-pro-preview",
+			"gemini-3.8-flash-high", "gemini-3.8-flash-medium", "gemini-3.8-flash-low")
 	}
 	if s.kiro != nil {
-		data = add(data, "kiro", "kiro")
+		kiroModels := []string{"kiro"}
+		if lister, ok := s.kiro.(interface{ ListModels(context.Context) []string }); ok {
+			for _, m := range lister.ListModels(r.Context()) {
+				kiroModels = append(kiroModels, "kiro-"+m)
+				if strings.HasPrefix(m, "deepseek") || strings.HasPrefix(m, "minimax") ||
+					strings.HasPrefix(m, "glm") || strings.HasPrefix(m, "qwen") {
+					kiroModels = append(kiroModels, m)
+				}
+			}
+		} else {
+			for _, m := range []string{"auto", "claude-sonnet-4.5", "claude-sonnet-4", "claude-haiku-4.5", "deepseek-3.2", "minimax-m2.5", "glm-5", "qwen3-coder-next"} {
+				kiroModels = append(kiroModels, "kiro-"+m)
+			}
+		}
+		data = add(data, "kiro", kiroModels...)
 	}
 	if s.bob != nil {
 		data = add(data, "ibm", "bob", "bob-shell")
@@ -293,6 +308,16 @@ func isGeminiModel(model string) bool {
 func isBobModel(model string) bool {
 	m := strings.ToLower(strings.TrimSpace(model))
 	return strings.HasPrefix(m, "bob")
+}
+
+// isKiroModel mengembalikan true bila nama model menunjuk ke engine Kiro.
+func isKiroModel(model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+	if strings.HasPrefix(m, "kiro") {
+		return true
+	}
+	return strings.HasPrefix(m, "deepseek") || strings.HasPrefix(m, "minimax") ||
+		strings.HasPrefix(m, "glm") || strings.HasPrefix(m, "qwen")
 }
 
 // claudeModelOverride memetakan field "model" OpenAI ke argumen --model claude.
