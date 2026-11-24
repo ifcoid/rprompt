@@ -23,6 +23,10 @@ const apiModelName = "claude-code"
 type chatMessage struct {
 	Role    string          `json:"role"`
 	Content json.RawMessage `json:"content"` // string ATAU array bagian konten
+
+	ToolCalls  []openAIToolCall `json:"tool_calls"`   // role assistant
+	ToolCallID string           `json:"tool_call_id"` // role tool
+	Name       string           `json:"name"`
 }
 
 type chatCompletionRequest struct {
@@ -30,7 +34,12 @@ type chatCompletionRequest struct {
 	Messages []chatMessage `json:"messages"`
 	Stream   bool          `json:"stream"`
 
-	// Hanya dipakai engine Ollama; engine CLI mengabaikannya.
+	Tools             []openAITool    `json:"tools"`
+	ToolChoice        json.RawMessage `json:"tool_choice"`
+	ParallelToolCalls *bool           `json:"parallel_tool_calls"`
+	StreamOptions     *streamOptions  `json:"stream_options"`
+
+	// Dipakai engine Ollama; effort juga dipakai engine CLI pada mode tool.
 	ReasoningEffort     string          `json:"reasoning_effort"`
 	Reasoning           *reasoningParam `json:"reasoning"`
 	Temperature         *float64        `json:"temperature"`
@@ -61,6 +70,8 @@ type chatRespMessage struct {
 	Role             string `json:"role"`
 	Content          string `json:"content"`
 	ReasoningContent string `json:"reasoning_content,omitempty"` // thinking (Ollama)
+
+	ToolCalls []openAIToolCall `json:"tool_calls,omitempty"`
 }
 
 type chatUsage struct {
@@ -90,9 +101,16 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Ollama menerima messages terstruktur (dirapikan), engine lain satu prompt rata.
+	if optionRe.MatchString(req.Model) {
+		writeOpenAIError(w, http.StatusBadRequest, "nama model tidak valid", "invalid_request_error")
+		return
+	}
+
+	// Ollama menerima messages terstruktur (dirapikan), engine lain satu prompt rata,
+	// atau giliran tool (job) bila request menyangkut tool.
 	var prompt string
 	var oreq *ollama.ChatRequest
+	var job *toolJob
 	if isOllamaModel(req.Model) {
 		if s.ollama == nil {
 			writeOpenAIError(w, http.StatusBadRequest,
@@ -105,6 +123,13 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		oreq = &o
+	} else if toolRequest(&req) {
+		j, err := s.newToolJob(&req)
+		if err != nil {
+			writeOpenAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error")
+			return
+		}
+		job = j
 	} else {
 		prompt = buildPrompt(req.Messages)
 		if prompt == "" {
@@ -125,13 +150,18 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	// stream=true: balas SSE bertahap (hindari timeout 524 Cloudflare untuk
 	// output panjang). stream=false: balas JSON utuh seperti biasa.
 	if req.Stream {
-		s.streamChat(ctx, w, &req, prompt, oreq)
+		s.streamChat(ctx, w, &req, prompt, oreq, job)
+		return
+	}
+	if job != nil {
+		s.handleToolJob(ctx, w, req.Model, job)
 		return
 	}
 
 	// Pilih engine berdasarkan field "model": "ollama/..." -> Ollama, "gemini..." -> AGY,
-	// "kiro" -> Kiro CLI, selain itu -> Claude. Semuanya stateless.
+	// "codex" -> Codex, "kiro" -> Kiro CLI, selain itu -> Claude. Semuanya stateless.
 	var text, reasoning string
+	var calls []openAIToolCall
 	var usage chatUsage // hanya Ollama yang melaporkan token
 	finish := "stop"
 	if oreq != nil {
@@ -142,6 +172,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		text, reasoning = res.Content, res.Thinking
+		calls = fromOllamaCalls(res.ToolCalls)
 		usage = chatUsage{
 			PromptTokens:     res.PromptTokens,
 			CompletionTokens: res.CompletionTokens,
@@ -171,6 +202,19 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			log.Printf("openai api bob error: %v", err)
 			writeOpenAIError(w, http.StatusBadGateway, "Bob error: "+err.Error(), "api_error")
+			return
+		}
+		text = out
+	} else if isCodexModel(req.Model) {
+		if s.codex == nil {
+			writeOpenAIError(w, http.StatusBadRequest,
+				"model Codex tidak diaktifkan (set CODEX_ENABLED=true)", "invalid_request_error")
+			return
+		}
+		out, err := s.codex.Run(ctx, prompt, s.cfg.WorkDir, req.Model)
+		if err != nil {
+			log.Printf("openai api codex error: %v", err)
+			writeOpenAIError(w, http.StatusBadGateway, "Codex error: "+err.Error(), "api_error")
 			return
 		}
 		text = out
@@ -205,7 +249,14 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		text = res.Text
 	}
 
-	model := req.Model
+	writeChat(w, req.Model, chatRespMessage{
+		Role: "assistant", Content: text, ReasoningContent: reasoning, ToolCalls: calls,
+	}, finish, usage)
+}
+
+// writeChat membalas chat.completion utuh. Jawaban yang memuat tool call selalu
+// selesai dengan "tool_calls", kecuali terpotong.
+func writeChat(w http.ResponseWriter, model string, msg chatRespMessage, finish string, usage chatUsage) {
 	if model == "" {
 		model = apiModelName
 	}
@@ -216,11 +267,18 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		Model:   model,
 		Choices: []chatChoice{{
 			Index:        0,
-			Message:      chatRespMessage{Role: "assistant", Content: text, ReasoningContent: reasoning},
-			FinishReason: finish,
+			Message:      msg,
+			FinishReason: toolFinish(finish, msg.ToolCalls),
 		}},
 		Usage: usage,
 	})
+}
+
+func toolFinish(finish string, calls []openAIToolCall) string {
+	if finish == "stop" && len(calls) > 0 {
+		return "tool_calls"
+	}
+	return finish
 }
 
 // acquireAPI mengambil slot konkurensi API. Paralel (tidak diantrikan): bila
@@ -261,6 +319,9 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 			"gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-3-pro-preview",
 			"gemini-3.8-flash-high", "gemini-3.8-flash-medium", "gemini-3.8-flash-low")
 	}
+	if s.codex != nil {
+		data = add(data, "openai", "codex")
+	}
 	if s.kiro != nil {
 		kiroModels := []string{"kiro"}
 		if lister, ok := s.kiro.(interface{ ListModels(context.Context) []string }); ok {
@@ -299,9 +360,17 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 
 // --- Helper ---
 
-// isGeminiModel mengembalikan true bila nama model menunjuk ke engine Gemini.
+// isGeminiModel mengembalikan true bila nama model menunjuk ke engine AGY:
+// "gemini...", "agy", atau "agy/<nama dari agy models>".
 func isGeminiModel(model string) bool {
-	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "gemini")
+	m := strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(m, "gemini") || m == "agy" || strings.HasPrefix(m, "agy/")
+}
+
+// isCodexModel mengembalikan true untuk "codex" atau "codex/<model>".
+func isCodexModel(model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+	return m == "codex" || strings.HasPrefix(m, "codex/")
 }
 
 // isBobModel mengembalikan true bila nama model menunjuk ke engine Bob.

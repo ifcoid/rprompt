@@ -29,6 +29,7 @@ import (
 	"github.com/awangga/rprompt/internal/claude"
 	"github.com/awangga/rprompt/internal/config"
 	"github.com/awangga/rprompt/internal/agy"
+	"github.com/awangga/rprompt/internal/codex"
 	"github.com/awangga/rprompt/internal/kiro"
 	"github.com/awangga/rprompt/internal/mcpserver"
 	"github.com/awangga/rprompt/internal/ollama"
@@ -124,6 +125,13 @@ func main() {
 		log.Printf("engine AGY AKTIF (bin %q, auth: %s)", cfg.AgyBin, auth)
 	}
 
+	// Engine Codex CLI opsional untuk API (model "codex" atau "codex/<model>").
+	var cdx server.APIRunner
+	if cfg.CodexEnabled {
+		cdx = codex.New(cfg.CodexBin, cfg.CodexExtraArgs)
+		log.Printf("engine Codex AKTIF (bin %q)", cfg.CodexBin)
+	}
+
 	// Engine Kiro CLI opsional untuk API (routing via field "model").
 	var kir server.APIRunner
 	if cfg.KiroEnabled {
@@ -145,7 +153,7 @@ func main() {
 		log.Printf("engine Ollama AKTIF (%s)", oll.BaseURL)
 	}
 
-	srv := server.New(cfg, tg, runner, &apiRunner, gem, kir, bRunner, oll, st, reg)
+	srv := server.New(cfg, tg, runner, &apiRunner, gem, cdx, kir, bRunner, oll, st, reg)
 
 	httpSrv := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	httpLn := mustListen(cfg.ListenAddr, "server HTTP")
@@ -345,7 +353,7 @@ func printReady(cfg *config.Config) {
 	fmt.Printf("    Telegram : %s\n", tg)
 	fmt.Printf("    HTTP API : %s\n", api)
 	if cfg.AgyEnabled || cfg.KiroEnabled || cfg.BobEnabled {
-		fmt.Printf("    Engine   : Claude + AGY/Kiro/Bob (pilih via field \"model\")\n")
+		fmt.Printf("    Engine   : Claude + AGY/Codex/Kiro/Bob/Ollama (pilih via field \"model\")\n")
 	}
 	fmt.Println()
 }

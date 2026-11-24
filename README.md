@@ -92,7 +92,7 @@ Pindah komputer? `git clone` → salin `.env` → `claude login` → jalankan.
 - **File**: kirim foto/dokumen untuk dianalisis, `/get <path>` ambil berkas,
   gambar yang disebut di jawaban dikirim otomatis.
 - **Izin tool via tombol** Telegram (opsional).
-- **HTTP API OpenAI-compatible** dengan 5 engine: **Claude**, **AGY CLI**, **Kiro CLI**, **Bob Shell**, & **Ollama**.
+- **HTTP API OpenAI-compatible** dengan 6 engine: **Claude**, **AGY CLI**, **Codex CLI**, **Kiro CLI**, **Bob Shell**, & **Ollama**.
 - Whitelist chat id + secret token; Telegram serial, API paralel.
 
 ## Perintah bot
@@ -132,6 +132,8 @@ c.responses.create(model="ollama/gemma4:12b", input=[...], reasoning={"effort": 
 - **Engine via `model`**:
   - Claude: `claude-code`, `opus`, `sonnet`, `haiku`, dll.
   - AGY CLI: Diawali `gemini` (mis. `gemini-2.5-flash`, `gemini-3.8-flash-high`, `gemini-pro`).
+  - AGY dengan model lain: `agy`, `agy/<nama dari agy models>`.
+  - Codex CLI: `codex` atau `codex/<model>`.
   - Kiro CLI: `kiro` (default auto), atau model spesifik realtime seperti `kiro-claude-sonnet-4.5`, `kiro-claude-haiku-4.5`, `kiro-deepseek-3.2`, `kiro-minimax-m2.5`, `kiro-glm-5`, `kiro-qwen3-coder-next` (bisa juga langsung `deepseek-3.2` atau alias `kiro-sonnet`, `kiro-haiku`). Daftar model realtime dapat dilihat di `GET /v1/models`.
   - Bob Shell: "bob" atau "bob-shell".
   - Ollama: diawali `ollama/` (mis. `ollama/qwen3.5:9b`).
@@ -142,8 +144,17 @@ c.responses.create(model="ollama/gemma4:12b", input=[...], reasoning={"effort": 
   `reasoning.effort` dipetakan ke `think`: `none` → mati, `minimal`/`low`/`medium`/`high`/`xhigh`
   → level. Untuk model tanpa thinking, effort diabaikan. Thinking dikembalikan sebagai
   `reasoning_content` (chat) atau item `reasoning` (responses). `temperature`, `top_p`,
-  dan `max_tokens` ikut diteruskan. Gambar hanya berupa data URL base64. Belum
-  mendukung tools dan `previous_response_id`.
+  dan `max_tokens` ikut diteruskan. Gambar hanya berupa data URL base64. Tools
+  didukung; `previous_response_id` belum.
+- **Tool calling** (`tools`, `tool_calls`, role `tool`): tool dijalankan oleh klien (mis.
+  [llmy](https://ll.my.id)), bukan oleh rprompt.
+  - Ollama: native, di `/v1/chat/completions` dan `/v1/responses`.
+  - Claude, AGY, Codex: CLI-nya tidak menerima tool dari luar, jadi tool dijelaskan lewat
+    teks dan permintaannya dibaca dari jawaban. Selama giliran itu tool bawaan CLI
+    dimatikan, folder kerjanya kosong, dan `*_EXTRA_ARGS` milik Claude/AGY tidak dipakai.
+    Teks dikirim sekaligus di akhir giliran, tidak bertahap.
+  - Kiro dan Bob belum mendukung: dibalas 400.
+- **Codex**: `npm i -g @openai/codex` lalu `codex login` → `CODEX_ENABLED=true`.
 - **Streaming** (`stream:true`): SSE + keepalive — **wajib untuk output panjang di
   balik Cloudflare** (hindari timeout 524 ~100s). `stream:false` balas JSON utuh.
 - **Stateless** (kirim seluruh `messages` tiap call), **paralel** (`API_MAX_CONCURRENT`).

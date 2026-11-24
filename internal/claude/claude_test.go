@@ -1,6 +1,15 @@
 package claude
 
-import "testing"
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+
+	"github.com/awangga/rprompt/internal/toolcall"
+)
 
 func TestParseStreamLineSystemInit(t *testing.T) {
 	line := []byte(`{"type":"system","subtype":"init","session_id":"abc-123"}`)
@@ -108,4 +117,37 @@ func equal(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// Mode tool tidak boleh membawa tool bawaan, MCP, atau ExtraArgs.
+func TestRunToolsMengunci(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("memakai skrip sh")
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "claude")
+	script := "#!/bin/sh\nfor a in \"$@\"; do echo \"[$a]\"; done > " + dir + "/args\nls -A > " + dir + "/ls\n" +
+		"while [ $# -gt 0 ]; do [ \"$1\" = --system-prompt-file ] && cat \"$2\" > " + dir + "/sys; shift; done\ncat > /dev/null\n" +
+		`echo '{"type":"result","result":"ok","usage":{"input_tokens":1,"cache_read_input_tokens":2,"cache_creation_input_tokens":4,"output_tokens":3}}'`
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r := &Runner{Bin: bin, ExtraArgs: []string{"--dangerously-skip-permissions"}, PermissionArgs: []string{"--mcp-config", "x"}}
+	rep, err := r.RunTools(context.Background(), toolcall.Request{System: "SIS", Prompt: "PRO", Model: "haiku"})
+	if err != nil || rep.Text != "ok" || rep.InTokens != 7 || rep.OutTokens != 3 {
+		t.Fatalf("RunTools = %+v, %v", rep, err)
+	}
+	read := func(n string) string { b, _ := os.ReadFile(filepath.Join(dir, n)); return string(b) }
+	args := read("args")
+	for _, want := range []string{"[--tools]\n[]", "[--strict-mcp-config]", "[--setting-sources]\n[]", "[--model]\n[haiku]"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("args tanpa %q: %s", want, args)
+		}
+	}
+	if strings.Contains(args, "dangerously") || strings.Contains(args, "--mcp-config]") && !strings.Contains(args, "strict-mcp-config]") {
+		t.Errorf("ExtraArgs/PermissionArgs tidak boleh ikut: %s", args)
+	}
+	if read("ls") != "" || read("sys") != "SIS" {
+		t.Errorf("folder kerja %q, system %q", read("ls"), read("sys"))
+	}
 }

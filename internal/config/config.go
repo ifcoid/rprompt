@@ -35,6 +35,11 @@ type Config struct {
 	AgyExtraArgs []string // argumen tambahan untuk agy
 	AgyUseOAuth  bool     // paksa login CLI (strip AGY_API_KEY/GOOGLE_API_KEY)
 
+	// Codex CLI (opsional): model "codex" atau "codex/<model>" di API.
+	CodexEnabled   bool     // aktifkan engine Codex
+	CodexBin       string   // path binary codex
+	CodexExtraArgs []string // argumen tambahan untuk codex exec
+
 	// Kiro CLI (opsional) untuk routing via field "model" di API.
 	KiroEnabled   bool     // aktifkan engine Kiro
 	KiroBin       string   // path binary kiro-cli
@@ -136,6 +141,10 @@ func Load() (*Config, error) {
 	if g := strings.TrimSpace(os.Getenv("AGY_EXTRA_ARGS")); g != "" {
 		c.AgyExtraArgs = strings.Fields(g)
 	}
+
+	c.CodexEnabled = getenvBool("CODEX_ENABLED", true)
+	c.CodexBin = getenv("CODEX_BIN", "codex")
+	c.CodexExtraArgs = strings.Fields(os.Getenv("CODEX_EXTRA_ARGS"))
 
 	c.KiroEnabled = getenvBool("KIRO_ENABLED", true)
 	c.KiroBin = getenv("KIRO_BIN", "kiro-cli")

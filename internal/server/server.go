@@ -42,6 +42,7 @@ type Server struct {
 	runner    promptRunner // jalur Telegram (boleh pakai izin interaktif)
 	apiRunner promptRunner // jalur API (tanpa izin interaktif)
 	agy       APIRunner    // engine AGY untuk API (nil bila nonaktif)
+	codex     APIRunner    // engine Codex untuk API (nil bila nonaktif)
 	kiro      APIRunner    // engine Kiro untuk API (nil bila nonaktif)
 	bob       APIRunner    // engine Bob untuk API (nil bila nonaktif)
 	ollama    *ollama.Client // engine Ollama untuk API (nil bila nonaktif)
@@ -58,8 +59,8 @@ type Server struct {
 
 // New membangun Server. reg boleh nil bila izin interaktif tidak dipakai.
 // apiRunner dipakai jalur API (sebaiknya tanpa argumen --permission-prompt-tool).
-// gem/kir/bob/oll boleh nil bila AGY/Kiro/Bob/Ollama tidak diaktifkan.
-func New(cfg *config.Config, tg *telegram.Client, runner, apiRunner promptRunner, gem APIRunner, kir APIRunner, bob APIRunner, oll *ollama.Client, st *store.Store, reg *approval.Registry) *Server {
+// gem/cdx/kir/bob/oll boleh nil bila AGY/Codex/Kiro/Bob/Ollama tidak diaktifkan.
+func New(cfg *config.Config, tg *telegram.Client, runner, apiRunner promptRunner, gem, cdx, kir, bob APIRunner, oll *ollama.Client, st *store.Store, reg *approval.Registry) *Server {
 	var apiSem chan struct{}
 	if cfg.APIMaxConcurrent > 0 {
 		apiSem = make(chan struct{}, cfg.APIMaxConcurrent)
@@ -70,6 +71,7 @@ func New(cfg *config.Config, tg *telegram.Client, runner, apiRunner promptRunner
 		runner:    runner,
 		apiRunner: apiRunner,
 		agy:       gem,
+		codex:     cdx,
 		kiro:      kir,
 		bob:       bob,
 		ollama:    oll,

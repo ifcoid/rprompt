@@ -21,6 +21,20 @@ type Message struct {
 	Role    string   `json:"role"`
 	Content string   `json:"content"`
 	Images  []string `json:"images,omitempty"` // base64 tanpa prefix "data:"
+
+	ToolCalls []ToolCall `json:"tool_calls,omitempty"` // assistant
+	ToolName  string     `json:"tool_name,omitempty"`  // role "tool"
+}
+
+// ToolCall adalah permintaan tool dari model.
+type ToolCall struct {
+	Function ToolFunction `json:"function"`
+}
+
+// ToolFunction memuat nama dan argumen; Arguments berupa objek JSON.
+type ToolFunction struct {
+	Name      string          `json:"name"`
+	Arguments json.RawMessage `json:"arguments"`
 }
 
 // ChatRequest adalah body /api/chat. Stream selalu diaktifkan oleh Chat.
@@ -30,12 +44,16 @@ type ChatRequest struct {
 	Stream   bool           `json:"stream"`
 	Think    any            `json:"think,omitempty"` // nil | false | "low" | "medium" | "high"
 	Options  map[string]any `json:"options,omitempty"`
+
+	// Tools memakai bentuk yang sama dengan Chat Completions OpenAI.
+	Tools []json.RawMessage `json:"tools,omitempty"`
 }
 
 // Result adalah hasil akhir satu panggilan Chat.
 type Result struct {
 	Content          string
 	Thinking         string
+	ToolCalls        []ToolCall
 	DoneReason       string // "stop" | "length" | ...
 	PromptTokens     int
 	CompletionTokens int // termasuk token thinking
@@ -90,6 +108,8 @@ func (c *Client) Chat(ctx context.Context, req ChatRequest, onDelta func(content
 			Message struct {
 				Content  string `json:"content"`
 				Thinking string `json:"thinking"`
+
+				ToolCalls []ToolCall `json:"tool_calls"`
 			} `json:"message"`
 			Done            bool   `json:"done"`
 			DoneReason      string `json:"done_reason"`
@@ -113,6 +133,7 @@ func (c *Client) Chat(ctx context.Context, req ChatRequest, onDelta func(content
 				onDelta(ch.Message.Content, ch.Message.Thinking)
 			}
 		}
+		res.ToolCalls = append(res.ToolCalls, ch.Message.ToolCalls...)
 		if ch.Done {
 			res.Content = content.String()
 			res.Thinking = thinking.String()
@@ -221,7 +242,8 @@ func ThinkForEffort(effort string) (any, error) {
 // urutan lain (mis. user lalu system) membuat prompt rusak atau error.
 //   - Semua pesan system/developer digabung (sesuai urutan) jadi SATU pesan
 //     system di awal.
-//   - Role lain selain user/assistant (mis. tool) diperlakukan sebagai user.
+//   - Hasil tool (role tool) dipertahankan bila menjawab tool call tepat
+//     sebelumnya; selain itu, seperti role lain, diperlakukan sebagai user.
 //   - Pesan tanpa teks & gambar dibuang.
 //   - Pesan berurutan dengan role sama digabung, sehingga user/assistant
 //     selalu berselang-seling.
@@ -233,7 +255,12 @@ func Normalize(msgs []Message) []Message {
 	for _, m := range msgs {
 		role := strings.ToLower(strings.TrimSpace(m.Role))
 		text := strings.TrimSpace(m.Content)
-		if text == "" && len(m.Images) == 0 {
+		if role == "tool" && afterCall(convo) {
+			// Hasil kosong pun dikirim: tiap tool call harus punya pasangan.
+			convo = append(convo, Message{Role: role, Content: m.Content, ToolName: m.ToolName})
+			continue
+		}
+		if text == "" && len(m.Images) == 0 && len(m.ToolCalls) == 0 {
 			continue
 		}
 		switch role {
@@ -246,13 +273,17 @@ func Normalize(msgs []Message) []Message {
 		default:
 			role = "user"
 		}
-		if n := len(convo); n > 0 && convo[n-1].Role == role {
+		if role != "assistant" {
+			m.ToolCalls = nil
+		}
+		if n := len(convo); n > 0 && convo[n-1].Role == role && len(convo[n-1].ToolCalls) == 0 {
 			prev := &convo[n-1]
 			prev.Content = joinText(prev.Content, text)
 			prev.Images = append(prev.Images, m.Images...)
+			prev.ToolCalls = m.ToolCalls
 			continue
 		}
-		convo = append(convo, Message{Role: role, Content: text, Images: slices.Clone(m.Images)})
+		convo = append(convo, Message{Role: role, Content: text, Images: slices.Clone(m.Images), ToolCalls: m.ToolCalls})
 	}
 
 	if len(systems) == 0 {
@@ -263,6 +294,18 @@ func Normalize(msgs []Message) []Message {
 		sys.Role = "user"
 	}
 	return append([]Message{sys}, convo...)
+}
+
+// afterCall mengembalikan true bila giliran terakhir masih menunggu hasil tool.
+func afterCall(convo []Message) bool {
+	results := 0
+	for i := len(convo) - 1; i >= 0; i-- {
+		if convo[i].Role != "tool" {
+			return len(convo[i].ToolCalls) > results
+		}
+		results++
+	}
+	return false
 }
 
 func joinText(a, b string) string {

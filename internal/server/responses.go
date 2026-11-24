@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/awangga/rprompt/internal/ollama"
+	"github.com/awangga/rprompt/internal/toolcall"
 )
 
 // --- Tipe request/response ala OpenAI Responses API ---
@@ -27,6 +28,22 @@ type responsesRequest struct {
 	TopP               *float64        `json:"top_p"`
 	MaxOutputTokens    *int            `json:"max_output_tokens"`
 	PreviousResponseID string          `json:"previous_response_id"`
+	Tools              []responsesTool `json:"tools"`
+	ToolChoice         json.RawMessage `json:"tool_choice"`
+}
+
+// responsesTool adalah tool versi Responses API: tanpa pembungkus "function".
+type responsesTool struct {
+	Type string `json:"type"`
+	toolcall.Tool
+}
+
+func (r *responsesRequest) chatTools() []openAITool {
+	var out []openAITool
+	for _, t := range r.Tools {
+		out = append(out, openAITool{Type: t.Type, Function: t.Tool})
+	}
+	return out
 }
 
 type responseObject struct {
@@ -42,14 +59,19 @@ type responseObject struct {
 	Usage             *responseUsage     `json:"usage"`
 }
 
-// responseItem adalah item output: "reasoning" (thinking model) atau "message".
+// responseItem adalah item output: "reasoning" (thinking model), "message", atau
+// "function_call".
 type responseItem struct {
 	ID      string         `json:"id"`
 	Type    string         `json:"type"`
 	Status  string         `json:"status"`
 	Role    string         `json:"role,omitempty"`
 	Summary []responsePart `json:"summary,omitzero"` // wajib [] pada reasoning
-	Content []responsePart `json:"content"`
+	Content []responsePart `json:"content,omitzero"`
+
+	CallID    string  `json:"call_id,omitempty"` // function_call
+	Name      string  `json:"name,omitempty"`
+	Arguments *string `json:"arguments,omitempty"`
 }
 
 type responsePart struct {
@@ -301,13 +323,38 @@ func (b *responseBuilder) closeItem() {
 	b.send("response.output_item.done", map[string]any{"output_index": idx, "item": *it})
 }
 
-// finish menutup item terakhir dan mengembalikan response final. Selalu ada
-// satu item message (boleh kosong) agar klien menemukan output_text.
+// addCalls menambahkan tiap tool call sebagai item "function_call".
+func (b *responseBuilder) addCalls(calls []openAIToolCall) {
+	for _, c := range calls {
+		idx := len(b.items)
+		empty, args := "", c.Function.Arguments
+		it := responseItem{
+			ID:     fmt.Sprintf("fc_%s_%d", b.id[len("resp_"):], idx),
+			Type:   "function_call",
+			Status: "in_progress",
+			CallID: c.ID, Name: c.Function.Name, Arguments: &empty,
+		}
+		b.send("response.output_item.added", map[string]any{"output_index": idx, "item": it})
+		ref := func(k, v string) map[string]any {
+			return map[string]any{"item_id": it.ID, "output_index": idx, k: v}
+		}
+		b.send("response.function_call_arguments.delta", ref("delta", args))
+		b.send("response.function_call_arguments.done", ref("arguments", args))
+		it.Status, it.Arguments = "completed", &args
+		b.items = append(b.items, it)
+		b.send("response.output_item.done", map[string]any{"output_index": idx, "item": it})
+	}
+}
+
+// finish menutup item terakhir dan mengembalikan response final. Bila tidak ada
+// tool call, selalu ada satu item message (boleh kosong) agar klien menemukan
+// output_text.
 func (b *responseBuilder) finish(res ollama.Result) responseObject {
 	b.closeItem()
+	b.addCalls(fromOllamaCalls(res.ToolCalls))
 	hasMsg := false
 	for _, it := range b.items {
-		hasMsg = hasMsg || it.Type == "message"
+		hasMsg = hasMsg || it.Type == "message" || it.Type == "function_call"
 	}
 	if !hasMsg {
 		b.openItem("message")

@@ -9,9 +9,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+
+	"github.com/awangga/rprompt/internal/toolcall"
 )
 
 // Runner mengeksekusi binary claude dengan konfigurasi tetap.
@@ -27,6 +32,8 @@ type Result struct {
 	Text      string // teks jawaban final
 	SessionID string // session id untuk melanjutkan percakapan berikutnya
 	IsError   bool   // true bila claude melaporkan error
+	InTokens  int    // token masukan termasuk cache; 0 bila tak dilaporkan
+	OutTokens int
 }
 
 // StreamEvent adalah satu kejadian yang diparse dari aliran output claude.
@@ -52,6 +59,12 @@ type streamMsg struct {
 	} `json:"message"`
 	Result  string `json:"result"`
 	IsError bool   `json:"is_error"`
+	Usage   struct {
+		In         int `json:"input_tokens"`
+		CacheWrite int `json:"cache_creation_input_tokens"`
+		CacheRead  int `json:"cache_read_input_tokens"`
+		Out        int `json:"output_tokens"`
+	} `json:"usage"`
 }
 
 // ResumeLatest dipakai sebagai nilai sessionID untuk melanjutkan sesi TERAKHIR
@@ -89,7 +102,56 @@ func (r *Runner) RunStream(ctx context.Context, prompt, sessionID, workDir, mode
 		workDir = r.WorkDir
 	}
 
-	cmd := exec.CommandContext(ctx, r.Bin, r.buildArgs(sessionID, model)...)
+	return r.run(ctx, r.buildArgs(sessionID, model), prompt, sessionID, workDir, onEvent)
+}
+
+// toolArgs mematikan semua sumber tool: tool bawaan, MCP, dan setelan pengguna
+// atau proyek (hook, plugin). ExtraArgs & PermissionArgs sengaja tidak dipakai.
+func toolArgs(model, effort, systemFile string) []string {
+	args := []string{"-p", "--output-format", "stream-json", "--verbose",
+		"--tools", "", "--strict-mcp-config", "--setting-sources", "",
+		"--disable-slash-commands", "--no-session-persistence",
+		"--system-prompt-file", systemFile}
+	if model != "" {
+		args = append(args, "--model", model)
+	}
+	if effort != "" {
+		args = append(args, "--effort", effort)
+	}
+	return args
+}
+
+// RunTools menjawab satu giliran dengan semua tool Claude Code dimatikan.
+func (r *Runner) RunTools(ctx context.Context, req toolcall.Request) (toolcall.Reply, error) {
+	dir, cleanup, err := toolcall.TempDir()
+	if err != nil {
+		return toolcall.Reply{}, err
+	}
+	defer cleanup()
+	work := filepath.Join(dir, "kerja")
+	if err := os.Mkdir(work, 0o700); err != nil {
+		return toolcall.Reply{}, err
+	}
+	sys := filepath.Join(dir, "system.md")
+	if err := os.WriteFile(sys, []byte(req.System), 0o600); err != nil {
+		return toolcall.Reply{}, err
+	}
+	res, err := r.run(ctx, toolArgs(req.Model, req.Effort, sys), req.Prompt, "", work, func(StreamEvent) {})
+	if err != nil || res.IsError {
+		msg := strings.TrimSpace(res.Text) // pesan asli, mis. rate limit
+		if msg == "" && err != nil {
+			msg = err.Error()
+		}
+		if msg == "" {
+			msg = "Claude melaporkan error"
+		}
+		return toolcall.Reply{}, errors.New(msg)
+	}
+	return toolcall.Reply{Text: res.Text, InTokens: res.InTokens, OutTokens: res.OutTokens}, nil
+}
+
+func (r *Runner) run(ctx context.Context, args []string, prompt, sessionID, workDir string, onEvent func(StreamEvent)) (Result, error) {
+	cmd := exec.CommandContext(ctx, r.Bin, args...)
 	cmd.Dir = workDir
 	cmd.Stdin = strings.NewReader(prompt)
 
@@ -119,6 +181,7 @@ func (r *Runner) RunStream(ctx context.Context, prompt, sessionID, workDir, mode
 			if ev.Final != nil {
 				result.Text = ev.Final.Text
 				result.IsError = ev.Final.IsError
+				result.InTokens, result.OutTokens = ev.Final.InTokens, ev.Final.OutTokens
 				if ev.Final.SessionID != "" {
 					result.SessionID = ev.Final.SessionID
 				}
@@ -184,6 +247,8 @@ func parseStreamLine(line []byte) ([]StreamEvent, bool) {
 			Text:      m.Result,
 			SessionID: m.SessionID,
 			IsError:   m.IsError,
+			InTokens:  m.Usage.In + m.Usage.CacheWrite + m.Usage.CacheRead,
+			OutTokens: m.Usage.Out,
 		}})
 	}
 	if len(evs) == 0 {

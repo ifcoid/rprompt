@@ -21,7 +21,10 @@ Sebelum memulai, pastikan Anda telah menginstal program AI bawaan berikut di kom
    - Install: Buka terminal dan jalankan `npm install -g kiro-cli` (atau sesuai petunjuk resminya).
 4. **Bob Shell CLI**:
    - Install: Buka terminal dan jalankan `npm install -g @ibm/bob`
-5. **Ollama** (opsional, tidak butuh NPM; hanya dipakai lewat HTTP API):
+5. **Codex CLI** (opsional):
+   - Install: `npm install -g @openai/codex`
+   - Login: `codex login`
+6. **Ollama** (opsional, tidak butuh NPM; hanya dipakai lewat HTTP API):
    - Install: unduh dari [ollama.com/download](https://ollama.com/download).
    - Unduh model, misalnya: `ollama pull qwen3.5:9b`
    - Pastikan Ollama berjalan (default di `http://localhost:11434`).

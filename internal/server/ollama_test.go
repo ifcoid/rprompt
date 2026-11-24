@@ -253,7 +253,7 @@ func TestResponsesRejects(t *testing.T) {
 	for _, body := range []string{
 		`{"model":"claude-code","input":"Hai"}`,
 		`{"model":"ollama/m","input":"Hai","previous_response_id":"resp_1"}`,
-		`{"model":"ollama/m","input":[{"type":"function_call_output","output":"x"}]}`,
+		`{"model":"ollama/m","input":[{"type":"computer_call_output","output":"x"}]}`,
 		`{"model":"ollama/m","input":42}`,
 		`{"model":"ollama/m"}`,
 	} {

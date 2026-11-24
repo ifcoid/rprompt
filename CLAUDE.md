@@ -46,7 +46,9 @@ systemctl status rprompt --no-pager
 - `tunnel` — integrasi cloudflared (named/quick tunnel).
 - `approval` — izin tool via tombol Telegram (✅/⛔).
 - `mcpserver` — server MCP.
-- `agy` / `kiro` / `bob` — engine alternatif (Gemini/AGY, Kiro, Bob Shell), dipilih
+- `toolcall` — tool calling untuk engine CLI: menyusun prompt & membaca `<use_tool>`
+  dari jawaban. Dipakai `server/tools.go`; tiap engine mengisi `RunTools`.
+- `agy` / `codex` / `kiro` / `bob` — engine alternatif, dipilih
   lewat field `model` di API. Di deployment saat ini yang aktif hanya Claude dan
   Ollama (`OLLAMA_ENABLED=true`, model `ollama/<nama>`).
 
@@ -61,3 +63,10 @@ systemctl status rprompt --no-pager
   promptnya berubah dan jawabannya ikut salah. `ollama.Normalize` yang memperbaikinya.
   Model tanpa thinking menolak `think` (400 `does not support thinking`), jadi
   `ollama.Client.Chat` mengulang request tanpa `think`.
+- **Tool calling engine CLI**: tool milik klien, jadi tool bawaan CLI wajib mati saat
+  `RunTools` (claude `--tools ""`, agy deny rules lewat `--settings`, codex fitur
+  dimatikan + sandbox read-only). Jangan meneruskan `--dangerously-*` di jalur ini.
+  Cek ulang dengan CLI asli bila versinya berubah.
+- Tag yang dipakai `<use_tool>`, bukan `<tool_call>`: parser Ollama untuk qwen menelan
+  `<tool_call>` dan membalas HTTP 500.
+- Riwayat yang memuat tool call tetap lewat jalur tool walau request tanpa `tools`.

@@ -126,7 +126,7 @@ func TestChatStreamsAndCollects(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := Result{Content: "Hai Budi", Thinking: "hmm", DoneReason: "stop", PromptTokens: 12, CompletionTokens: 7}
-	if res != want {
+	if !reflect.DeepEqual(res, want) {
 		t.Errorf("result = %+v, want %+v", res, want)
 	}
 	if strings.Join(deltas, ",") != "|hmm,Hai|, Budi|" {
@@ -191,5 +191,43 @@ func TestModelsSkipsEmbedding(t *testing.T) {
 	names, err := New(srv.URL).Models(context.Background())
 	if err != nil || !reflect.DeepEqual(names, []string{"qwen3.5:9b", "lama:1b"}) {
 		t.Errorf("Models() = %v, %v", names, err)
+	}
+}
+
+func TestNormalizeTools(t *testing.T) {
+	call := []ToolCall{{Function: ToolFunction{Name: "read", Arguments: json.RawMessage(`{"path":"a"}`)}}}
+	got := Normalize([]Message{
+		{Role: "user", Content: "baca"},
+		{Role: "assistant", ToolCalls: call},
+		{Role: "tool", ToolName: "read", Content: ""},
+		{Role: "tool", ToolName: "read", Content: "tanpa pasangan"},
+		{Role: "assistant", Content: "selesai"},
+		{Role: "user", Content: "lagi", ToolCalls: call},
+	})
+	want := []Message{
+		{Role: "user", Content: "baca"},
+		{Role: "assistant", ToolCalls: call},
+		{Role: "tool", ToolName: "read"},
+		{Role: "user", Content: "tanpa pasangan"},
+		{Role: "assistant", Content: "selesai"},
+		{Role: "user", Content: "lagi"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Normalize = %+v", got)
+	}
+}
+
+func TestNormalizeKeepsToolCalls(t *testing.T) {
+	call := func(n string) []ToolCall {
+		return []ToolCall{{Function: ToolFunction{Name: n, Arguments: json.RawMessage(`{}`)}}}
+	}
+	got := Normalize([]Message{
+		{Role: "user", Content: "x"},
+		{Role: "assistant", Content: "saya baca"},
+		{Role: "assistant", ToolCalls: call("a")},
+		{Role: "assistant", ToolCalls: call("b")},
+	})
+	if len(got) != 3 || got[1].Content != "saya baca" || got[1].ToolCalls[0].Function.Name != "a" || got[2].ToolCalls[0].Function.Name != "b" {
+		t.Errorf("Normalize = %+v", got)
 	}
 }

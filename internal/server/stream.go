@@ -23,6 +23,7 @@ type chatChunk struct {
 	Created int64             `json:"created"`
 	Model   string            `json:"model"`
 	Choices []chatChunkChoice `json:"choices"`
+	Usage   *chatUsage        `json:"usage,omitempty"`
 }
 
 type chatChunkChoice struct {
@@ -35,13 +36,15 @@ type chatChunkDelta struct {
 	Role             string `json:"role,omitempty"`
 	Content          string `json:"content,omitempty"`
 	ReasoningContent string `json:"reasoning_content,omitempty"` // thinking (Ollama)
+
+	ToolCalls []openAIToolCall `json:"tool_calls,omitempty"`
 }
 
 // streamChat membalas /v1/chat/completions dalam format SSE OpenAI (stream=true).
 // Output dikirim bertahap dan disisipi keepalive comment agar koneksi tetap
 // aktif — mencegah timeout 524 Cloudflare (~100s) pada output yang panjang.
-// oreq diisi (prompt kosong) bila model diarahkan ke Ollama.
-func (s *Server) streamChat(ctx context.Context, w http.ResponseWriter, req *chatCompletionRequest, prompt string, oreq *ollama.ChatRequest) {
+// oreq diisi (prompt kosong) bila model diarahkan ke Ollama, job bila giliran tool.
+func (s *Server) streamChat(ctx context.Context, w http.ResponseWriter, req *chatCompletionRequest, prompt string, oreq *ollama.ChatRequest, job *toolJob) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeOpenAIError(w, http.StatusInternalServerError, "server tidak mendukung streaming", "api_error")
@@ -62,10 +65,10 @@ func (s *Server) streamChat(ctx context.Context, w http.ResponseWriter, req *cha
 	created := time.Now().Unix()
 
 	var mu sync.Mutex // serialisasi penulisan (konten vs keepalive)
-	send := func(delta chatChunkDelta, finish *string) {
+	chunk := func(choices []chatChunkChoice, usage *chatUsage) {
 		b, _ := json.Marshal(chatChunk{
 			ID: id, Object: "chat.completion.chunk", Created: created, Model: model,
-			Choices: []chatChunkChoice{{Index: 0, Delta: delta, FinishReason: finish}},
+			Choices: choices, Usage: usage,
 		})
 		mu.Lock()
 		_, _ = w.Write([]byte("data: "))
@@ -73,6 +76,15 @@ func (s *Server) streamChat(ctx context.Context, w http.ResponseWriter, req *cha
 		_, _ = w.Write([]byte("\n\n"))
 		flusher.Flush()
 		mu.Unlock()
+	}
+	send := func(delta chatChunkDelta, finish *string) {
+		chunk([]chatChunkChoice{{Index: 0, Delta: delta, FinishReason: finish}}, nil)
+	}
+	sendCalls := func(calls []openAIToolCall) {
+		for i := range calls {
+			calls[i].Index = &i
+			send(chatChunkDelta{ToolCalls: calls[i : i+1]}, nil)
+		}
 	}
 	raw := func(str string) {
 		mu.Lock()
@@ -103,14 +115,36 @@ func (s *Server) streamChat(ctx context.Context, w http.ResponseWriter, req *cha
 
 	var errDetail string // pesan error asli engine (mis. rate limit) bila ada
 	finish := "stop"
-	if oreq != nil {
+	var usage *chatUsage
+	if job != nil {
+		res, err := job.run(ctx)
+		if err != nil {
+			errDetail = err.Error()
+		} else {
+			if res.text != "" {
+				send(chatChunkDelta{Content: res.text}, nil)
+			}
+			sendCalls(res.calls)
+			finish = toolFinish(finish, res.calls)
+			if res.usage.TotalTokens > 0 {
+				usage = &res.usage
+			}
+		}
+	} else if oreq != nil {
 		res, err := s.ollama.Chat(ctx, *oreq, func(content, thinking string) {
 			send(chatChunkDelta{Content: content, ReasoningContent: thinking}, nil)
 		})
 		if err != nil {
 			errDetail = "Ollama error: " + err.Error()
 		} else {
-			finish = finishReason(res.DoneReason)
+			calls := fromOllamaCalls(res.ToolCalls)
+			sendCalls(calls)
+			finish = toolFinish(finishReason(res.DoneReason), calls)
+			usage = &chatUsage{
+				PromptTokens:     res.PromptTokens,
+				CompletionTokens: res.CompletionTokens,
+				TotalTokens:      res.PromptTokens + res.CompletionTokens,
+			}
 		}
 	} else if isKiroModel(req.Model) {
 		if s.kiro == nil {
@@ -128,6 +162,17 @@ func (s *Server) streamChat(ctx context.Context, w http.ResponseWriter, req *cha
 			send(chatChunkDelta{Content: "[error] model Bob tidak diaktifkan (BOB_ENABLED=true)"}, nil)
 		} else {
 			out, err := s.bob.Run(ctx, prompt, s.cfg.WorkDir, req.Model)
+			if err != nil {
+				errDetail = err.Error()
+			} else if out != "" {
+				send(chatChunkDelta{Content: out}, nil)
+			}
+		}
+	} else if isCodexModel(req.Model) {
+		if s.codex == nil {
+			send(chatChunkDelta{Content: "[error] model Codex tidak diaktifkan (CODEX_ENABLED=true)"}, nil)
+		} else {
+			out, err := s.codex.Run(ctx, prompt, s.cfg.WorkDir, req.Model)
 			if err != nil {
 				errDetail = err.Error()
 			} else if out != "" {
@@ -182,6 +227,9 @@ func (s *Server) streamChat(ctx context.Context, w http.ResponseWriter, req *cha
 		mu.Unlock()
 	} else {
 		send(chatChunkDelta{}, &finish)
+		if usage != nil && req.StreamOptions != nil && req.StreamOptions.IncludeUsage {
+			chunk([]chatChunkChoice{}, usage)
+		}
 	}
 	raw("data: [DONE]\n\n")
 }
